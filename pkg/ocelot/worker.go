@@ -49,6 +49,7 @@ func (wp *WorkerPool) StartWorkers() {
 		},
 	).Debugf("Started %d Workers", wp.Params.NWorkers)
 
+	// Block Forever...
 	go func() {
 		wg.Wait()
 	}()

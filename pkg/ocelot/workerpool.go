@@ -61,17 +61,13 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 
 	wp.StartWorkers() // Start Workers...
 
-	// The Decoder reads data from server and unmarsals into a Job object
-	// Jobs are sent to workers as available...
-	go func() {
-		for {
-			errChan <- dec.Decode(&j)
-		}
-	}()
-
 	// Logic for processing incoming requests...
 	// Shutdown involves closing the client side jobs channel
 	for {
+
+		// The Decoder reads data from server and unmarsals into a Job object
+		// Jobs are sent to workers as available...
+		errChan <- dec.Decode(&j)
 
 		select {
 		// Recieves from `errChan <- dec.Decode(&j)` above; will recieve nil if

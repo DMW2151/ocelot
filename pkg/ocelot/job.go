@@ -13,7 +13,7 @@ import (
 // TODO: Consider adding a channel for each job instance; this allows
 // us to remove failed goroutines from `StartSchedule`
 type Job struct {
-	// Randomly generated UUID for each job, uniquely resolves to a
+	// ID - Randomly generated UUID for each job, uniquely resolves to a
 	// `Job` and server session
 	ID uuid.UUID
 
@@ -21,8 +21,17 @@ type Job struct {
 	// more frequently than `Interval`
 	Interval time.Duration
 
-	// Path of URL to Call...
-	Path string
+	Path string // Path of URL to Call...
+
+	// NOTE: Pre-emptively attaching ticker to a Job; might modify
+	// schedules rather than stop && restart??
+	Ticker *time.Ticker
+
+	// Job Specific Channel; used to communicate results to a central
+	// Producer channel - Attach Ticker && Create New Ticker to Modify
+	JobStagingChan chan *JobInstance
+
+	// TODO: Mutex (or Semaphore) here if we ever need to modify
 }
 
 // JobInstance - Instance of a Job
@@ -30,9 +39,10 @@ type JobInstance struct {
 	// Randomly generated UUID for each instance, uniquely created
 	// for each tick
 	InstanceID uuid.UUID
-	CTime      int64 // Instance Ctime, MTime
-	MTime      int64
-	Job        Job
+
+	CTime int64 // Instance Ctime, MTime
+	MTime int64
+	Job   Job
 }
 
 // JobPool - Collection on of Jobs on the producer
@@ -40,7 +50,6 @@ type JobPool struct {
 	Jobs    []*Job // TODO - as a map iff need to modify
 	JobChan chan *JobInstance
 	// TODO: Mutex (or Semaphore) here if we ever need to modify
-	// Mu      *sync.Mutex
 }
 
 // newInstance - creates new instance of JobInstance
@@ -69,6 +78,8 @@ func (j *Job) sendInstance(JobChan chan<- *JobInstance) {
 
 		// Send over channel; will be consumed by an encoder
 		// before being send on network
+
+		// Send job instance to Intermediate Channel
 		JobChan <- ji
 	}
 }
@@ -80,11 +91,11 @@ func (j *Job) StartSchedule(ctx context.Context, JobChan chan<- *JobInstance) {
 	// Send first Job on server start; block subsequent sends with time.Ticker()
 	// set to interval...
 	j.sendInstance(JobChan)
-	t := time.NewTicker(j.Interval)
+	j.Ticker = time.NewTicker(j.Interval)
 
 	// On exit of StartSchedule; release the ticker
 	defer func() {
-		t.Stop()
+		j.Ticker.Stop()
 		log.WithFields(log.Fields{"Job ID": j.ID}).Info("No Longer Producing Job")
 	}()
 
@@ -92,7 +103,7 @@ func (j *Job) StartSchedule(ctx context.Context, JobChan chan<- *JobInstance) {
 	for {
 		select {
 		// Interval has passed - Put Job into Jobs Channel
-		case <-t.C:
+		case <-j.Ticker.C:
 			// NOTE: There is the risk of accumulating tasks here, esp. on
 			// server start.
 			j.sendInstance(JobChan)
@@ -103,5 +114,15 @@ func (j *Job) StartSchedule(ctx context.Context, JobChan chan<- *JobInstance) {
 
 		}
 	}
+}
 
+// StopJob - Access the underlying job in JobPool
+// and modify the ticker
+func (jp *JobPool) StopJob() {
+	// Not Implemented
+}
+
+// gatherJobs -
+func (jp *JobPool) gatherJobs() {
+	// Not Implemented
 }

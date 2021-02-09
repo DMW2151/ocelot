@@ -66,3 +66,7 @@ func main() {
     p.Serve(ctx)
 }
 ```
+
+### changelog
+
+- 02-09-2021 - Implementing a method to start and stop scheduled jobs user should be able to call a method that puts/removes a job...

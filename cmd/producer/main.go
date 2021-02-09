@@ -4,8 +4,6 @@ import (
 	"context"
 	"math/rand"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	ocelot "ocelot/pkg/ocelot"
@@ -42,22 +40,15 @@ var jobs = []*ocelot.Job{
 // Define Context
 func main() {
 
+	// Set Cancel...
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Start Producer
 	p, _ := ocelot.NewProducer(pConfig, jobs)
 
-	// Set Cancel...
-	ctx, cancel := context.WithCancel(context.Background())
-
 	// Start Timers for each job Available in the Jobpool
 	// on server start
-	go p.Serve(ctx)
-
-	// Block...
-	termChan := make(chan os.Signal, 1)
-	signal.Notify(termChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Cancel Context
-	<-termChan
-	cancel()
+	p.Serve(ctx)
 
 }

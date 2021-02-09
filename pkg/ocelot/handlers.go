@@ -1,3 +1,4 @@
+// Package ocelot ...
 package ocelot
 
 import (
@@ -10,25 +11,21 @@ import (
 )
 
 // HTTPFail -
-func HTTPFail(j Job) error {
-
+func HTTPFail(j *JobInstance) error {
 	time.Sleep(100 * time.Millisecond)
 	return fmt.Errorf("Default Error")
 }
 
 // HTTPSuccess -
-func HTTPSuccess(j Job) error {
-
+func HTTPSuccess(j *JobInstance) error {
 	time.Sleep(100 * time.Millisecond)
 	return nil
 }
 
 // HTTPRandomSuccess -
-func HTTPRandomSuccess(j Job) error {
-
+func HTTPRandomSuccess(j *JobInstance) error {
 	time.Sleep(100 * time.Millisecond)
-	x0 := rand.Intn(100)
-	if x0 > 14 {
+	if 5 > rand.Intn(100) {
 		return fmt.Errorf("Default Error")
 	}
 	return nil
@@ -36,7 +33,7 @@ func HTTPRandomSuccess(j Job) error {
 }
 
 // HTTPGetSize - Default Function to Test HTTP Calls
-func HTTPGetSize(j Job) error {
+func HTTPGetSize(j *JobInstance) error {
 
 	// Set Redirect to False
 	client := &http.Client{
@@ -47,7 +44,7 @@ func HTTPGetSize(j Job) error {
 
 	// Make an HTTP Request from Job's path GET content
 	// This is Where Some Logic Should Go
-	resp, err := client.Get(j.Path)
+	resp, err := client.Get(j.Job.Path)
 
 	if err != nil {
 		log.WithFields(log.Fields{"Error": err}).Warn()
@@ -61,14 +58,6 @@ func HTTPGetSize(j Job) error {
 	}
 
 	defer resp.Body.Close()
-
-	// log.WithFields(
-	// 	log.Fields{
-	// 		"BodySize":    resp.ContentLength,
-	// 		"Job ID":      j.ID,
-	// 		"Instance ID": j.InstanceID,
-	// 	},
-	// ).Info("This Can be a Kinesis Put...")
 
 	return nil
 }

@@ -8,8 +8,9 @@ import (
 	"syscall"
 	"time"
 
-	server "ocelot/pkg/server"
+	ocelot "ocelot/pkg/ocelot"
 
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -23,35 +24,39 @@ func init() {
 	rand.Seed(time.Now().UTC().UnixNano())
 }
 
-var sConfig = &server.Config{
-	Concurrency: 5,
-	Host:        "0.0.0.0:2151",
+// Initialize Job Params...
+var pConfig = &ocelot.ProducerConfig{
+	JobChannelBuffer: 5,
+	ListenAddr:       os.Getenv("OCELOT_LISTEN_ADDR"),
 }
 
-var jConfigs = []*server.JobConfig{
+var jobs = []*ocelot.Job{
 	{
-		Path:            "https://hello.com/en/index.html",
-		Interval:        time.Millisecond * 300,
-		MaxRetries:      3,
-		BackoffFunction: server.ExpBackoff,
+		ID:       uuid.New(),
+		Interval: time.Millisecond * 300,
+		Path:     "https://hello.com/en/index.html",
 	},
 }
 
 // Define Context
 func main() {
 
-	// Start Server
-	s := server.NewServer(sConfig, jConfigs)
+	// Start Producer
+	p, _ := ocelot.NewProducer(pConfig, jobs)
 
 	// Set Cancel...
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Start Timers
-	for _, j := range s.Manager.Jobs {
-		go j.StartJob(ctx, s.Manager.JobChan)
+	// Start Timers for each job Available in the Jobpool
+	// on server start
+
+	// TODO (??): defer this until a connection is made available,
+	// prevents throttle on start...
+	for _, j := range p.JobPool.Jobs {
+		go j.StartSchedule(ctx, p.JobPool.JobChan)
 	}
 
-	go s.Serve(ctx)
+	go p.Serve(ctx)
 
 	// Block...
 	termChan := make(chan os.Signal, 1)

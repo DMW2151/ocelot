@@ -3,6 +3,7 @@ package ocelot
 
 import (
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -22,9 +23,12 @@ type WorkParams struct {
 	// Callable that workers in this pool execute
 	Func Callable
 
-	// IP and IP of Producer
+	// IP and Host of Producer
 	Host string
 	Port string
+
+	// How long to wait on Producer to respond
+	DialTimeout time.Duration
 }
 
 // StartWorkers ...
@@ -32,20 +36,23 @@ func (wp *WorkerPool) StartWorkers() {
 
 	var wg sync.WaitGroup
 
-	// Start Workers
-	log.WithFields(
-		log.Fields{"Workers": wp.Params.NWorkers},
-	).Info("Started Workers")
-
+	// Start a GR for each worker in the pool...
 	for i := 0; i < wp.Params.NWorkers; i++ {
 		wg.Add(1)
 		go wp.start(&wg)
 	}
 
-	// Wait...
+	log.WithFields(
+		log.Fields{
+			"Worker Addr":   (*wp.Connection).LocalAddr().String(),
+			"Producer Addr": (*wp.Connection).RemoteAddr().String(),
+		},
+	).Debugf("Started %d Workers", wp.Params.NWorkers)
+
 	go func() {
 		wg.Wait()
 	}()
+
 }
 
 // Execute the Worker
@@ -54,7 +61,7 @@ func (wp *WorkerPool) start(wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	for j := range wp.Pending {
-
+		// Do the Work; Call the Function...
 		err := wp.Params.Func(&j)
 
 		// Report Results to logs
@@ -64,14 +71,18 @@ func (wp *WorkerPool) start(wg *sync.WaitGroup) {
 					"Error":       err,
 					"Job ID":      j.Job.ID,
 					"Instance ID": j.InstanceID,
-				}).Warn("Job Failed")
+				},
+			).Error("Job Failed")
+			break
 		}
 
+		// Log success...
 		log.WithFields(
 			log.Fields{
 				"Job ID":      j.Job.ID,
 				"Instance ID": j.InstanceID,
-			}).Info("Job Success")
+			},
+		).Debug("Job Success")
 	}
 
 }

@@ -13,12 +13,14 @@ import (
 // HTTPFail -
 func HTTPFail(j *JobInstance) error {
 	time.Sleep(100 * time.Millisecond)
+	log.Info("Job Complete")
 	return fmt.Errorf("Default Error")
 }
 
 // HTTPSuccess -
 func HTTPSuccess(j *JobInstance) error {
 	time.Sleep(100 * time.Millisecond)
+	log.Info("Job Complete")
 	return nil
 }
 
@@ -28,6 +30,7 @@ func HTTPRandomSuccess(j *JobInstance) error {
 	if 5 > rand.Intn(100) {
 		return fmt.Errorf("Default Error")
 	}
+	log.Info("Job Complete")
 	return nil
 
 }

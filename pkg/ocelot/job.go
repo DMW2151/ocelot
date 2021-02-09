@@ -58,14 +58,14 @@ func (j *Job) newInstance() (*JobInstance, error) {
 func (j *Job) sendInstance(JobChan chan<- *JobInstance) {
 
 	if ji, err := j.newInstance(); err != nil {
-		log.Warn("Placeholder - Failed to Create Job Instance")
+		log.Warn("Failed to Create Job Instance")
 	} else {
 		// Successful Instance Creation
 		log.WithFields(
 			log.Fields{
 				"Job ID":      ji.Job.ID,
 				"Instance ID": ji.InstanceID,
-			}).Info("Created Job")
+			}).Debug("Created Job")
 
 		// Send over channel; will be consumed by an encoder
 		// before being send on network

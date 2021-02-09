@@ -20,7 +20,7 @@ func init() {
 	customFormatter.TimestampFormat = "2006-01-02 15:04:05.0000"
 	log.SetFormatter(customFormatter)
 	customFormatter.FullTimestamp = true
-
+	log.SetLevel(log.DebugLevel)
 	rand.Seed(time.Now().UTC().UnixNano())
 }
 
@@ -28,12 +28,13 @@ func init() {
 var pConfig = &ocelot.ProducerConfig{
 	JobChannelBuffer: 5,
 	ListenAddr:       os.Getenv("OCELOT_LISTEN_ADDR"),
+	MaxConnections:   1,
 }
 
 var jobs = []*ocelot.Job{
 	{
 		ID:       uuid.New(),
-		Interval: time.Millisecond * 300,
+		Interval: time.Millisecond * 1000,
 		Path:     "https://hello.com/en/index.html",
 	},
 }
@@ -49,13 +50,6 @@ func main() {
 
 	// Start Timers for each job Available in the Jobpool
 	// on server start
-
-	// TODO (??): defer this until a connection is made available,
-	// prevents throttle on start...
-	for _, j := range p.JobPool.Jobs {
-		go j.StartSchedule(ctx, p.JobPool.JobChan)
-	}
-
 	go p.Serve(ctx)
 
 	// Block...

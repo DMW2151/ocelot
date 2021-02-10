@@ -20,50 +20,10 @@ type Producer struct {
 	NOpenConnections int
 }
 
-// ProducerConfig -
-type ProducerConfig struct {
-	// Non-negative Integer representing the max jobs held in
-	// Producer-side job channel
-	JobChannelBuffer int
-
-	// Addresses to Listen for New Connections
-	ListenAddr string
-
-	// Max Active Connections to producer
-	MaxConnections int
-}
-
-// NewProducer - Create New Server, attempt to open a connection
-func NewProducer(cfg *ProducerConfig, js []*Job) (*Producer, error) {
-
-	// Listen on Addr...
-	l, err := net.Listen("tcp", cfg.ListenAddr)
-
-	if err != nil {
-		log.WithFields(
-			log.Fields{"Producer Addr": cfg.ListenAddr},
-		).Fatal("Failed to Start Producer", err)
-	}
-
-	log.WithFields(
-		log.Fields{"Producer Addr": cfg.ListenAddr},
-	).Info("Listening")
-
-	// Combine to create Producer object
-	return &Producer{
-		Listener:         l,
-		JobPool:          &JobPool{Jobs: js, JobChan: make(chan *JobInstance, cfg.JobChannelBuffer)},
-		OpenConnections:  make([]*net.Conn, cfg.MaxConnections),
-		NOpenConnections: 0,
-		Config:           cfg,
-		Sem:              semaphore.NewWeighted(int64(cfg.MaxConnections)),
-	}, nil
-}
-
 // handleConnection - Handles incoming connections from workers
 // Forwards jobInstances from the Producer's JobsChan to a worker. Encodes
 // jobs using `gob` and sends jobInstance over TCP conn.
-func (p *Producer) handleConnection(ctx context.Context, c net.Conn, clientExitChan chan int) {
+func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 
 	// Shutdown the followig resources on exit
 	defer func() {
@@ -80,6 +40,7 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn, clientExitC
 		select {
 		// Work is available from the Producer
 		case j := <-p.JobPool.JobChan:
+
 			err := enc.Encode(&j) // Chances that connection drops riiight here are small...
 
 			if err != nil {
@@ -134,12 +95,14 @@ func (p *Producer) Serve(ctx context.Context) error {
 	// TODO (??): defer this until a connection is made available,
 	// prevents throttle on start...
 	for _, j := range p.JobPool.Jobs {
-		go j.StartSchedule(ctx, p.JobPool.JobChan)
+		go j.startSchedule(ctx)
 	}
+
+	// Register Gather Operation for Intermediate Channels
+	p.JobPool.gatherJobs()
 
 	// Create two dummy channels to manage communication
 	newConn := make(chan int, 1)
-	workerExit := make(chan int, 1)
 
 	for {
 		// Accept Incoming Connections; Single threaded through here...
@@ -169,18 +132,18 @@ func (p *Producer) Serve(ctx context.Context) error {
 			newConn <- 1
 		}
 
-		// Use a blocking select to chose one of the following cases
-		// either new connection && handle as such, or context close
+		// Chose one of the following cases && handle as such
+		// or context close
 		select {
 		case <-newConn:
 			log.WithFields(
 				log.Fields{"Worker Addr": c.RemoteAddr().String()},
 			).Debug("New Connection")
-			go p.handleConnection(ctx, c, workerExit)
+			go p.handleConnection(ctx, c)
 
 		case <-ctx.Done():
 			p.ShutDown(ctx)
-		default: // WARNING: Added 02-09-2021, Careful!!; Appears to have Worked
+		default:
 		}
 	}
 }

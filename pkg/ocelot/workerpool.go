@@ -4,9 +4,9 @@ package ocelot
 import (
 	"context"
 	"encoding/gob"
-	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -21,31 +21,28 @@ type WorkerPool struct {
 	Pending    chan JobInstance
 }
 
-// NewWorkerPool - Factory function for creating a WorkerPool
-func NewWorkerPool(wp *WorkParams) (*WorkerPool, error) {
+// StartWorkers ...
+func (wp *WorkerPool) StartWorkers() {
 
-	// Initialize Connection
-	// See env vars @ os.Getenv("OCELOT_HOST"), os.Getenv("OCELOT_PORT")
-	// TODO: Add to config...
-	c, err := net.DialTimeout(
-		"tcp",
-		fmt.Sprintf("%s:%s", wp.Host, wp.Port),
-		wp.DialTimeout,
-	)
+	var wg sync.WaitGroup
 
-	// Check Initial Dial ... (Almost?) Always TCP Dial Error (
-	// Host is down or wrong) OK to exit w. Code 1 here; no resources
-	// created yet...
-	if err != nil {
-		log.WithFields(log.Fields{"Error": err}).Fatal("Failed to Dial Producer")
+	// Start a GR for each worker in the pool...
+	wg.Add(wp.Params.NWorkers)
+	for i := 0; i < wp.Params.NWorkers; i++ {
+		go wp.start(&wg)
 	}
 
-	// Return WorkerPool Object from Config
-	return &WorkerPool{
-		Connection: &c,
-		Params:     wp,
-		Pending:    make(chan JobInstance, wp.MaxBuffer),
-	}, nil
+	log.WithFields(
+		log.Fields{
+			"Worker Addr":   (*wp.Connection).LocalAddr().String(),
+			"Producer Addr": (*wp.Connection).RemoteAddr().String(),
+		},
+	).Debugf("Started %d Workers", wp.Params.NWorkers)
+
+	// Block Forever...
+	go func() {
+		wg.Wait()
+	}()
 }
 
 // AcceptWork - Listens for work coming from server...
@@ -134,7 +131,6 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 		}
 
 	}
-
 }
 
 // Close - Wrapper around the net.Conn close function
@@ -157,4 +153,36 @@ func (wp *WorkerPool) Close() {
 			"Connection - Local": (*wp.Connection).LocalAddr().String(),
 		},
 	).Warn("Worker Addr")
+}
+
+// Execute the Worker
+func (wp *WorkerPool) start(wg *sync.WaitGroup) {
+
+	defer wg.Done()
+
+	for j := range wp.Pending {
+		// Do the Work; Call the Function...
+		err := wp.Params.Func(&j)
+
+		// Report Results to logs
+		if err != nil {
+			log.WithFields(
+				log.Fields{
+					"Error":       err,
+					"Job ID":      j.Job.ID,
+					"Instance ID": j.InstanceID,
+				},
+			).Error("Job Failed")
+			break
+		}
+
+		// Log success...
+		log.WithFields(
+			log.Fields{
+				"Job ID":      j.Job.ID,
+				"Instance ID": j.InstanceID,
+				"Duration":    -1 * j.CTime.Sub(time.Now()),
+			},
+		).Debug("Job Success")
+	}
 }

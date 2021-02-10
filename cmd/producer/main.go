@@ -31,10 +31,18 @@ var pConfig = &ocelot.ProducerConfig{
 
 var jobs = []*ocelot.Job{
 	{
-		ID:       uuid.New(),
-		Interval: time.Millisecond * 1000,
-		Path:     "https://hello.com/en/index.html",
+		ID:          uuid.New(),
+		Interval:    time.Millisecond * 1000,
+		Path:        "https://hello.com/en/index.html",
+		StagingChan: make(chan *ocelot.JobInstance, 2),
 	},
+}
+
+var newJob = ocelot.Job{
+	ID:          uuid.New(),
+	Interval:    time.Millisecond * 3000,
+	Path:        "https://www.holland.com/global/tourism.htm",
+	StagingChan: make(chan *ocelot.JobInstance, 2),
 }
 
 // Define Context
@@ -45,10 +53,21 @@ func main() {
 	defer cancel()
 
 	// Start Producer
-	p, _ := ocelot.NewProducer(pConfig, jobs)
+	p, _ := pConfig.NewProducer(jobs)
 
 	// Start Timers for each job Available in the Jobpool
 	// on server start
-	p.Serve(ctx)
+	go p.Serve(ctx)
+
+	// Add && Remove some Tasks...
+	time.Sleep(5 * time.Second)
+	p.JobPool.StopJob()
+
+	time.Sleep(1 * time.Second)
+
+	// Start a New Job
+	go p.JobPool.StartJob(ctx, &newJob)
+
+	time.Sleep(10 * time.Second)
 
 }

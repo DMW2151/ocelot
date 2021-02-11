@@ -32,8 +32,8 @@ func S3Grab(ji *ocelot.JobInstance) error {
 
 	output, err := svc.GetObject(
 		&s3.GetObjectInput{
-			Bucket: aws.String("ocelot-cctv"),
-			Key:    aws.String("Screen Shot 2020-12-07 at 8.09.20 PM.png"),
+			Bucket: aws.String("s3_bucket"),
+			Key:    aws.String("sample_file_to_download.png"),
 		},
 	)
 	if err != nil {

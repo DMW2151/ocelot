@@ -66,7 +66,6 @@ func (j *Job) sendInstance() {
 	// Send job instance to Intermediate Channel, will be
 	// consumed by an encoder before being send on network
 	j.StagingChan <- ji
-
 }
 
 // StartSchedule - Start a Job's Ticker, sending jobs to a jobs
@@ -97,7 +96,7 @@ func (j *Job) startSchedule(ctx context.Context) {
 	}
 }
 
-// flushChannel - Helper function for Test Teardown.
+// flushChannel - Helper function for test teardown.
 func (j *Job) flushChannel() {
 	for {
 		select {
@@ -105,5 +104,15 @@ func (j *Job) flushChannel() {
 		default:
 			return
 		}
+	}
+}
+
+// newMock - Helper function for mocking many jobs
+func newMock() *Job {
+	return &Job{
+		ID:          uuid.New(),
+		Interval:    time.Millisecond * 3000,
+		Path:        "https://hello.com/en/index.html",
+		StagingChan: make(chan *JobInstance, 0),
 	}
 }

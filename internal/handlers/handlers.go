@@ -2,14 +2,13 @@
 package ocelot
 
 import (
+	ocelot "github.com/dmw2151/ocelot"
 	"math/rand"
-	"ocelot/pkg/ocelot"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -18,7 +17,7 @@ type S3Handler struct {
 	Client *session.Session
 }
 
-// Work - Access S3 File
+// Work - Required to Implement Handler Interface
 func (sh *S3Handler) Work(ji *ocelot.JobInstance) error {
 	var err error
 
@@ -49,20 +48,11 @@ func (sh *S3Handler) Work(ji *ocelot.JobInstance) error {
 // MockHTTPHandler - For Testing HTTP Calls
 type MockHTTPHandler struct{}
 
-// Work - Not an HTTP Call; Just Waits 50-300ms for timing...
+// Work - Required to Implement Handler Interface
+// Not an HTTP Call; Just Waits 50-300ms for timing...
 func (m *MockHTTPHandler) Work(ji *ocelot.JobInstance) error {
 	time.Sleep(
 		time.Duration(rand.Intn(250)+50.0) * time.Millisecond,
 	)
 	return nil
-}
-
-// newMock
-func newMock() *ocelot.Job {
-	return &ocelot.Job{
-		ID:          uuid.New(),
-		Interval:    time.Millisecond * 3000,
-		Path:        "https://hello.com/en/index.html",
-		StagingChan: make(chan *ocelot.JobInstance, 0),
-	}
 }

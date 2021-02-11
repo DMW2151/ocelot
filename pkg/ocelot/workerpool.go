@@ -13,21 +13,19 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// WorkerPool - net connection with WorkParams attached..
-// WorkParams set channel buffering, concurrency, etc. of
-// WorkerPool
+// WorkerPool - net.Conn with WorkParams attached. WorkParams
+// set channel buffering, concurrency, etc. of WorkerPool
 type WorkerPool struct {
 	Connection *net.Conn
 	Params     *WorkParams
 	Pending    chan JobInstance
 }
 
-// StartWorkers ...
+// StartWorkers - Start Workers, runs `wp.Params.NWorkers`
 func (wp *WorkerPool) StartWorkers(sessionuuid uuid.UUID) {
 
 	var wg sync.WaitGroup
 
-	// Start a GR for each worker in the pool...
 	wg.Add(wp.Params.NWorkers)
 	for i := 0; i < wp.Params.NWorkers; i++ {
 		go wp.start(&wg, sessionuuid)
@@ -41,42 +39,32 @@ func (wp *WorkerPool) StartWorkers(sessionuuid uuid.UUID) {
 		},
 	).Debugf("Started %d Workers", wp.Params.NWorkers)
 
-	// Block Forever...
-	go func() {
-		wg.Wait()
-	}()
+	go func() { wg.Wait() }()
 }
 
 // AcceptWork - Listens for work coming from server...
 func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc) {
 
-	// Variables instantiated for each Client-> Server connection...
 	var (
 		errChan   = make(chan error, 10)
 		j         JobInstance
 		dec       = gob.NewDecoder(*wp.Connection)
-		t         = time.NewTicker(time.Millisecond * 60000) // REMOVE
+		t         = time.NewTicker(time.Millisecond * 60000) // TESTING
 		sessionID = uuid.New()
 	)
 
-	wp.StartWorkers(sessionID) // Start Workers...
+	wp.StartWorkers(sessionID)
 
-	// Logic for processing incoming requests...
-	// Shutdown involves closing the client side jobs channel
 	for {
-
 		// The Decoder reads data from server and unmarsals into a Job object
-		// Jobs are sent to workers as available...
+		// values from errChan will be nil
 		errChan <- dec.Decode(&j)
-
 		select {
-		// Recieves from `errChan <- dec.Decode(&j)` above; will recieve nil if
-		// Job properly marshalled...
+
 		case err := <-errChan:
 			if (err != nil) && (err != io.EOF) {
-				// Either Server is sending bad Jobs
-				//	- In which case the Encoder Buffer cannot be recovered -> Exit
-				// 	- Or Client has been closed, buffer is incomplete -> Exit
+				// Either Server Encoder buffer is off and cannot be recovered,
+				// or Client has been closed and buffer is incomplete -> Cancel & Exit
 				log.WithFields(
 					log.Fields{"Err": err},
 				).Error("Failed to Unmarshal Job From Server")
@@ -85,8 +73,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 			}
 
 			if err == io.EOF {
-				// Server has shutdown (or client otherwise recieves no data from the Server?)
-				// No more jobs to process...
+				// Server has shutdown (or otherwise recieves no data recieved)
 				log.WithFields(
 					log.Fields{
 						"Error":         err,
@@ -123,10 +110,8 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 			wp.Close()
 			return
 
-		// REMOVE: keeping this in for testing at the moment
-		// NOTE: On shutdown behavior:
-		// Workers recive remaining jobs; depending on the buffer, this can
-		// take a bit...
+		// TESTING: Workers recieve remaining jobs, depending on the buffer size,
+		// this can take a bit...
 		case <-t.C:
 			log.WithFields(
 				log.Fields{
@@ -136,41 +121,36 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 				},
 			).Warn("WorkerPool Timeout")
 			cancel()
-
 		default:
 		}
 
 	}
 }
 
-// Close - Wrapper around the net.Conn close function
+// Close - Wrapper around the net.Conn close function, also
+// Closes the Pool's Pending channel
 func (wp *WorkerPool) Close() {
 
-	// On close - Release Connection
+	// On close - Release Connection && Pool's Pending Channel
 	(*wp.Connection).Close()
+	close(wp.Pending)
+
 	log.WithFields(
 		log.Fields{
 			"Worker Addr":   (*wp.Connection).LocalAddr().String(),
 			"Producer Addr": (*wp.Connection).RemoteAddr().String(),
 		},
 	).Warn("Connection Closed")
-
-	// On close - Ensure that WP will not accept any new work
-	close(wp.Pending)
-
-	// TODO: Remove self from Active Connections; Relese Sema etc...
-	// p.NOpenConnections--
-	// p.Sem.Release(1)
 }
 
-// Execute the Worker
+// start - Execute the Worker
 func (wp *WorkerPool) start(wg *sync.WaitGroup, sessionuuid uuid.UUID) {
 
 	defer wg.Done()
 
 	for j := range wp.Pending {
 		// Do the Work; Call the Function...
-		err := wp.Params.Func(&j)
+		err := wp.Params.Handler.Work(&j)
 
 		// Report Results to logs
 		if err != nil {

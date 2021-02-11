@@ -128,7 +128,8 @@ func TestJobPool_gatherJobs(t *testing.T) {
 
 	t.Run("Check Gather...", func(t *testing.T) {
 
-		ctx, _ := context.WithCancel(context.Background())
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel() // NOTE: Not Required for Test, Needed For Go Vet
 
 		// Start Jobs && Wait 1000ms - Ensures this stays alive...
 		staticJP.StartJob(ctx, &staticNewJob)

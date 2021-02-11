@@ -9,8 +9,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Callable - Alias for Group of Functions
-type Callable func(j *JobInstance) error
+// JobHandler - Interface for Object that processes
+// a jobInstance
+type JobHandler interface {
+	Work(j *JobInstance) error
+}
 
 // WorkParams is a factory struct for WorkerPools
 type WorkParams struct {
@@ -21,8 +24,8 @@ type WorkParams struct {
 	MaxBuffer int
 
 	// Most likely User defined function of type
-	// Callable that workers in this pool execute
-	Func Callable
+	// JobHandler that workers in this pool execute
+	Handler JobHandler
 
 	// IP and Host of Producer
 	Host string
@@ -32,26 +35,24 @@ type WorkParams struct {
 	DialTimeout time.Duration
 }
 
-// NewWorkerPool - Factory function for creating a WorkerPool
+// NewWorkerPool - Factory for creating a WorkerPool object
+// from a Config
 func (wpa *WorkParams) NewWorkerPool() (*WorkerPool, error) {
 
-	// Initialize Connection
-	// See env vars @ os.Getenv("OCELOT_HOST"), os.Getenv("OCELOT_PORT")
-	// TODO: Add to config...
+	// Init Connection
 	c, err := net.DialTimeout(
 		"tcp",
 		fmt.Sprintf("%s:%s", wpa.Host, wpa.Port),
 		wpa.DialTimeout,
 	)
 
-	// Check Initial Dial ... (Almost?) Always TCP Dial Error (
-	// Host is down or wrong) OK to exit w. Code 1 here; no resources
-	// created yet...
 	if err != nil {
-		log.WithFields(log.Fields{"Error": err}).Fatal("Failed to Dial Producer")
+		// Difficult to Test, but this MUST be a Fatal Exit
+		log.WithFields(
+			log.Fields{"Error": err},
+		).Fatal("Failed to Dial Producer")
 	}
 
-	// Return WorkerPool Object from Config
 	return &WorkerPool{
 		Connection: &c,
 		Params:     wpa,

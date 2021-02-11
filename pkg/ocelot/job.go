@@ -11,12 +11,12 @@ import (
 
 // Job - Template for a Job
 type Job struct {
-	// ID - Randomly generated UUID for each job, uniquely resolves to a
-	// `Job` and server session
+	// ID - Randomly generated UUID for each job, uniquely resolves
+	// to a `Job` and server session
 	ID uuid.UUID
 
-	// Minimum Tick Interval of Producer; expect jobs to execute no
-	// more frequently than `Interval`
+	// Minimum Tick Interval of Producer; expect jobs
+	// to execute no more frequently than `Interval`
 	Interval time.Duration
 
 	Path string // Path of URL to Call...
@@ -27,6 +27,10 @@ type Job struct {
 
 	// Unexported ticker; used to schedule job freq.
 	ticker *time.Ticker
+
+	// Pass any and all Params here needed to augment the Path
+	// WARNING; MUST BE GOB Encodeable!
+	Params map[string]interface{}
 }
 
 // JobInstance - Instance of a Job + Template Attached as `Job` field
@@ -84,7 +88,6 @@ func (j *Job) startSchedule(ctx context.Context) {
 	for {
 		select {
 		// NOTE: 2021-02-10; Remove second check for && j.Ticker != nil
-		// Set ticker
 		case <-j.ticker.C:
 			j.sendInstance()
 		case <-ctx.Done():
@@ -95,7 +98,6 @@ func (j *Job) startSchedule(ctx context.Context) {
 }
 
 // flushChannel - Helper function for Test Teardown.
-// Might be useful, might be useless...
 func (j *Job) flushChannel() {
 	for {
 		select {

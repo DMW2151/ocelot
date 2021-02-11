@@ -7,6 +7,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -22,10 +25,17 @@ func init() {
 }
 
 var (
+	s3Client, _ = session.NewSession(
+		&aws.Config{
+			Region:                        aws.String("us-east-1"),
+			CredentialsChainVerboseErrors: aws.Bool(true),
+			Credentials:                   credentials.NewEnvCredentials(),
+		},
+	)
 	wp = &ocelot.WorkParams{
 		NWorkers:    20,
 		MaxBuffer:   10,
-		Func:        handlers.S3Grab,
+		Handler:     &handlers.S3Handler{},
 		Host:        os.Getenv("OCELOT_HOST"),
 		Port:        os.Getenv("OCELOT_PORT"),
 		DialTimeout: time.Duration(time.Millisecond * 1000),

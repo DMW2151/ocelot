@@ -11,21 +11,24 @@ import (
 )
 
 // HTTPFail -
-func HTTPFail(j *ocelot.JobInstance) error {
-	time.Sleep(100 * time.Millisecond)
+func HTTPFail(ji *ocelot.JobInstance) error {
+	time.Sleep(
+		time.Duration(rand.Intn(450)+50.0) * time.Millisecond,
+	)
 	log.Info("Job Complete")
 	return fmt.Errorf("Default Error")
 }
 
 // HTTPSuccess -
-func HTTPSuccess(j *ocelot.JobInstance) error {
-	time.Sleep(100 * time.Millisecond)
-	log.Info("Job Complete")
+func HTTPSuccess(ji *ocelot.JobInstance) error {
+	time.Sleep(
+		time.Duration(rand.Intn(250)+50.0) * time.Millisecond,
+	)
 	return nil
 }
 
 // HTTPRandomSuccess -
-func HTTPRandomSuccess(j *ocelot.JobInstance) error {
+func HTTPRandomSuccess(ji *ocelot.JobInstance) error {
 	time.Sleep(100 * time.Millisecond)
 	if 5 > rand.Intn(100) {
 		return fmt.Errorf("Default Error")

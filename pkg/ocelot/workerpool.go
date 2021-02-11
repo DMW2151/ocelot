@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -22,18 +23,19 @@ type WorkerPool struct {
 }
 
 // StartWorkers ...
-func (wp *WorkerPool) StartWorkers() {
+func (wp *WorkerPool) StartWorkers(sessionuuid uuid.UUID) {
 
 	var wg sync.WaitGroup
 
 	// Start a GR for each worker in the pool...
 	wg.Add(wp.Params.NWorkers)
 	for i := 0; i < wp.Params.NWorkers; i++ {
-		go wp.start(&wg)
+		go wp.start(&wg, sessionuuid)
 	}
 
 	log.WithFields(
 		log.Fields{
+			"Session ID":    sessionuuid,
 			"Worker Addr":   (*wp.Connection).LocalAddr().String(),
 			"Producer Addr": (*wp.Connection).RemoteAddr().String(),
 		},
@@ -50,13 +52,14 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 
 	// Variables instantiated for each Client-> Server connection...
 	var (
-		errChan = make(chan error, 10)
-		j       JobInstance
-		dec     = gob.NewDecoder(*wp.Connection)
-		t       = time.NewTicker(time.Millisecond * 10000) // REMOVE
+		errChan   = make(chan error, 10)
+		j         JobInstance
+		dec       = gob.NewDecoder(*wp.Connection)
+		t         = time.NewTicker(time.Millisecond * 60000) // REMOVE
+		sessionID = uuid.New()
 	)
 
-	wp.StartWorkers() // Start Workers...
+	wp.StartWorkers(sessionID) // Start Workers...
 
 	// Logic for processing incoming requests...
 	// Shutdown involves closing the client side jobs channel
@@ -87,6 +90,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 				log.WithFields(
 					log.Fields{
 						"Error":         err,
+						"Session ID":    sessionID,
 						"Worker Addr":   (*wp.Connection).LocalAddr().String(),
 						"Producer Addr": (*wp.Connection).RemoteAddr().String(),
 					},
@@ -99,32 +103,38 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 			wp.Pending <- j
 			log.WithFields(
 				log.Fields{
+					"Session ID":  sessionID,
 					"Job ID":      j.Job.ID,
 					"Instance ID": j.InstanceID,
+					"Duration":    -1 * j.CTime.Sub(time.Now()),
 				},
-			).Debug("Workers Recieved Job")
+			).Debug("WorkerPool Recieved Job")
 
 		// Recieves a Cancelfunc() call; either from the case(s) above or user
 		case <-ctx.Done():
 
 			log.WithFields(
 				log.Fields{
+					"Session ID":    sessionID,
 					"Worker Addr":   (*wp.Connection).LocalAddr().String(),
 					"Producer Addr": (*wp.Connection).RemoteAddr().String(),
 				},
-			).Warn("Worker Pool Shutdown")
+			).Warn("WorkerPool Shutdown")
 			wp.Close()
 			return
 
 		// REMOVE: keeping this in for testing at the moment
+		// NOTE: On shutdown behavior:
+		// Workers recive remaining jobs; depending on the buffer, this can
+		// take a bit...
 		case <-t.C:
 			log.WithFields(
 				log.Fields{
-					"Session ID":    1,
+					"Session ID":    sessionID,
 					"Worker Addr":   (*wp.Connection).LocalAddr().String(),
 					"Producer Addr": (*wp.Connection).RemoteAddr().String(),
 				},
-			).Warn("Ticker Timeout")
+			).Warn("WorkerPool Timeout")
 			cancel()
 
 		default:
@@ -145,18 +155,16 @@ func (wp *WorkerPool) Close() {
 		},
 	).Warn("Connection Closed")
 
-	// On close - Release Worker Pool - Not sure  if
-	// Overly cautious...
+	// On close - Ensure that WP will not accept any new work
 	close(wp.Pending)
-	log.WithFields(
-		log.Fields{
-			"Connection - Local": (*wp.Connection).LocalAddr().String(),
-		},
-	).Warn("Worker Addr")
+
+	// TODO: Remove self from Active Connections; Relese Sema etc...
+	// p.NOpenConnections--
+	// p.Sem.Release(1)
 }
 
 // Execute the Worker
-func (wp *WorkerPool) start(wg *sync.WaitGroup) {
+func (wp *WorkerPool) start(wg *sync.WaitGroup, sessionuuid uuid.UUID) {
 
 	defer wg.Done()
 
@@ -168,6 +176,7 @@ func (wp *WorkerPool) start(wg *sync.WaitGroup) {
 		if err != nil {
 			log.WithFields(
 				log.Fields{
+					"Session ID":  sessionuuid,
 					"Error":       err,
 					"Job ID":      j.Job.ID,
 					"Instance ID": j.InstanceID,
@@ -179,10 +188,11 @@ func (wp *WorkerPool) start(wg *sync.WaitGroup) {
 		// Log success...
 		log.WithFields(
 			log.Fields{
+				"Session ID":  sessionuuid,
 				"Job ID":      j.Job.ID,
 				"Instance ID": j.InstanceID,
 				"Duration":    -1 * j.CTime.Sub(time.Now()),
 			},
-		).Debug("Job Success")
+		).Info("Job Success")
 	}
 }

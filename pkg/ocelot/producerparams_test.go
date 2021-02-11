@@ -4,7 +4,9 @@ import (
 	"net"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -17,61 +19,81 @@ func init() {
 	log.SetLevel(log.DebugLevel)
 }
 
-func TestProducerConfig_newListener(t *testing.T) {
-	type fields struct {
-		JobChannelBuffer int
-		ListenAddr       string
-		MaxConnections   int
+var jobs = []*Job{
+	{
+		ID:          uuid.New(),
+		Interval:    time.Millisecond * 1000,
+		Path:        "https://hello.com/en/index.html",
+		StagingChan: make(chan *JobInstance, 2),
+	},
+}
+
+func TestProducerParams_newListener(t *testing.T) {
+
+	t.Run("Valid Listen Addr Produces a New Listener", func(t *testing.T) {
+
+		var pConfig = &ProducerConfig{
+			JobChannelBuffer: 5,
+			ListenAddr:       "127.0.0.1:8604",
+			MaxConnections:   1,
+		}
+
+		// Create a known connection & Extract Addr Struct
+		l, _ := net.Listen("tcp", pConfig.ListenAddr)
+		wantAddr := l.Addr().String()
+		l.Close()
+
+		// Compare Only Address of Network
+		if got, _ := pConfig.newListener(); !reflect.DeepEqual(got.Addr().String(), wantAddr) {
+			t.Errorf("ProducerConfig.newListener() = %v, want %v\n", got.Addr().String(), wantAddr)
+		}
+	})
+
+	t.Run("Invalid Listen Addr Produces Error", func(t *testing.T) {
+
+		var pConfig = &ProducerConfig{
+			JobChannelBuffer: 5,
+			ListenAddr:       "8.8.8.8:2151", // Nonsense Addr
+			MaxConnections:   1,
+		}
+
+		if _, err := pConfig.newListener(); !(reflect.TypeOf(err) == reflect.TypeOf(&net.OpError{})) {
+			t.Errorf(
+				"cfg.newListener() called with invalid Addr produces: %v wanted: %v",
+				reflect.TypeOf(err), reflect.TypeOf(net.OpError{}),
+			)
+		}
+
+	})
+
+}
+
+func TestProducerParams_NewProducer(t *testing.T) {
+
+	var pConfig = &ProducerConfig{
+		JobChannelBuffer: 5,
+		ListenAddr:       "127.0.0.1:8604",
+		MaxConnections:   1,
 	}
-	tests := []struct {
-		name   string
-		fields fields
-		want   net.Listener
-	}{
-		{
-			name: "T0 - Expected Port",
-			fields: fields{
-				JobChannelBuffer: 10,
-				ListenAddr:       "127.0.0.1:2151",
-				MaxConnections:   10,
-			},
-			want: nil, // See Note on TCP Testing...
-		},
-		{
-			name: "T1 - Port Bind Fail",
-			fields: fields{
-				JobChannelBuffer: 10,
-				ListenAddr:       "127.0.0.1:8000",
-				MaxConnections:   10,
-			},
-			want: nil, // See Note on TCP Testing...
-		},
+
+	p := pConfig.NewProducer(jobs)
+
+	// Check Listen Address, TODO: Bad Test - Fix...
+	if p.Listener.Addr().String() == "" {
+		t.Error("Addr")
 	}
 
-	for _, tt := range tests {
-
-		t.Run(tt.name, func(t *testing.T) {
-
-			cfg := &ProducerConfig{
-				JobChannelBuffer: tt.fields.JobChannelBuffer,
-				ListenAddr:       tt.fields.ListenAddr,
-				MaxConnections:   tt.fields.MaxConnections,
-			}
-
-			// Create a known connection & Extract Addr Struct
-			l, _ := net.Listen("tcp", cfg.ListenAddr)
-			wantAddr := l.Addr()
-			l.Close()
-
-			// Compare Only Address of Network
-			if got := cfg.newListener(); !reflect.DeepEqual(got.Addr(), wantAddr) {
-				t.Errorf("ProducerConfig.newListener() = %v, want %v\n", got.Addr(), wantAddr)
-			} else {
-				log.WithFields(
-					log.Fields{"Got": got.Addr(), "Want": wantAddr},
-				).Debug()
-			}
-
-		})
+	if !reflect.DeepEqual(p.JobPool.Jobs, jobs) {
+		t.Error("Jobs")
 	}
+
+	if !reflect.DeepEqual(cap(p.JobPool.JobChan), pConfig.JobChannelBuffer) {
+		t.Error("Chan Buffer")
+	}
+
+	// Check Max Connections = 5 & Allocated; N Open == 0
+	if (p.NOpenConnections != 0) || (pConfig.MaxConnections != len(p.OpenConnections)) {
+		t.Error("Connections")
+	}
+
 }

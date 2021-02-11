@@ -67,6 +67,12 @@ func main() {
 }
 ```
 
+### Testing
+
+```bash
+go test -coverprofile=./testcov/c.out ./pkg/ocelot/ && go tool cover -html=./testcov/c.out 
+```
+
 ### changelog
 
 - 02-09-2021 - Implementing a method to start and stop scheduled jobs user should be able to call a method that puts/removes a job...

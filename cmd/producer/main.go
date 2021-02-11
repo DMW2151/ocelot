@@ -24,15 +24,15 @@ func init() {
 
 // Initialize Job Params...
 var pConfig = &ocelot.ProducerConfig{
-	JobChannelBuffer: 5,
+	JobChannelBuffer: 0,
 	ListenAddr:       os.Getenv("OCELOT_LISTEN_ADDR"),
-	MaxConnections:   1,
+	MaxConnections:   2,
 }
 
 var jobs = []*ocelot.Job{
 	{
 		ID:          uuid.New(),
-		Interval:    time.Millisecond * 1000,
+		Interval:    time.Millisecond * 250,
 		Path:        "https://hello.com/en/index.html",
 		StagingChan: make(chan *ocelot.JobInstance, 2),
 	},
@@ -53,21 +53,24 @@ func main() {
 	defer cancel()
 
 	// Start Producer
-	p, _ := pConfig.NewProducer(jobs)
+	p := pConfig.NewProducer(jobs)
 
 	// Start Timers for each job Available in the Jobpool
 	// on server start
-	go p.Serve(ctx)
+	// p.Serve(ctx)
 
 	// Add && Remove some Tasks...
-	time.Sleep(5 * time.Second)
-	p.JobPool.StopJob()
+	p.Serve(ctx)
 
-	time.Sleep(1 * time.Second)
+	// TODO; THIS ROUTINE PRODUCES ERROR...
+	// time.Sleep(1 * time.Second)
+	// p.JobPool.StopJob()
 
-	// Start a New Job
-	go p.JobPool.StartJob(ctx, &newJob)
+	// time.Sleep(1 * time.Second)
 
-	time.Sleep(10 * time.Second)
+	// // Start a New Job
+	// go p.JobPool.StartJob(ctx, &newJob)
+
+	// time.Sleep(10 * time.Second)
 
 }

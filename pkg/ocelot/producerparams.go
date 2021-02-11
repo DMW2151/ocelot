@@ -22,27 +22,34 @@ type ProducerConfig struct {
 }
 
 // newListener from config...
-func (cfg *ProducerConfig) newListener() net.Listener {
+func (cfg *ProducerConfig) newListener() (net.Listener, error) {
 
 	var l, err = net.Listen("tcp", cfg.ListenAddr)
 
+	// Not Testable...Can't Ensure that Exits with Fail...
 	if err != nil {
 		log.WithFields(
 			log.Fields{"Producer Addr": cfg.ListenAddr},
-		).Fatal("Failed to Start Producer", err)
+		).Error("Failed to Start Producer", err)
+		return nil, err
 	}
 
 	log.WithFields(
 		log.Fields{"Producer Addr": cfg.ListenAddr},
 	).Info("Listening")
 
-	return l
+	return l, nil
 }
 
 // NewProducer - Create New Server, Initializes connection in function
-func (cfg *ProducerConfig) NewProducer(l net.Listener, js []*Job) *Producer {
+func (cfg *ProducerConfig) NewProducer(js []*Job) *Producer {
 
-	// Combine to create Producer object
+	l, err := cfg.newListener()
+
+	if err != nil {
+		return &Producer{} // Exit
+	}
+
 	return &Producer{
 		Listener: l,
 		JobPool: &JobPool{

@@ -17,7 +17,7 @@ func init() {
 	log.SetFormatter(customFormatter)
 	customFormatter.FullTimestamp = true
 
-	log.SetLevel(log.DebugLevel)
+	log.SetLevel(log.InfoLevel)
 
 }
 

@@ -27,37 +27,40 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 
 	// Shutdown the followig resources on exit
 	defer func() {
+		log.Info("Worker Connection Being Terminated...")
 		c.Close()
 		p.Sem.Release(1)
 		p.NOpenConnections--
 	}()
 
-	// Create encoder for each open connection; encoder never returns error (??)
+	// Create encoder for each open connection;
 	enc := gob.NewEncoder(c)
 
 	for {
-		// Select from one the the following...
 		select {
-		// Work is available from the Producer
+		// Work is available from the Producer's ticks
 		case j := <-p.JobPool.JobChan:
+			// This worker was shutdown after reciving the job, but the
+			// connection was not yet closed. Send Jobs terminated by
+			// connection drop back into the queue, this will almost
+			// assuredly be an issue eventually
 
-			err := enc.Encode(&j) // Chances that connection drops riiight here are small...
+			err := enc.Encode(&j)
 
 			if err != nil {
-				// Catches nil pointer error; otherwise data sent to worker as is.
-				// Will also catch broken pipe error etc.
 				log.WithFields(
 					log.Fields{
 						"Error":       err,
 						"Job ID":      j.Job.ID,
 						"Instance ID": j.InstanceID,
 					},
-				).Warnf("Failed to Dispatch Job, Retrying")
+				).Warnf("Failed to Dispatch Job - Worker Timeout (??) Retrying")
 
-				// NOTE: RETRY (??) - Send Jobs terminated by connection drop
-				// back into the queue, this will almost assuredly be an issue eventually
-				p.JobPool.JobChan <- j
-
+				// Only put back in queue if this won't cause an infinite loop...
+				// I.e. There is another open connection to recieve this data...
+				if p.NOpenConnections > 1 {
+					p.JobPool.JobChan <- j
+				}
 				return
 			}
 
@@ -77,19 +80,14 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 			).Error("Server Terminated - Got Kill Signal")
 			return
 
-		default: // No Blocking
 		}
 	}
 }
 
 // Serve --
 // Reading: https://eli.thegreenplace.net/2020/graceful-shutdown-of-a-tcp-server-in-go/
+// TODO: Closed Connection Cannot be Reopened Warning...
 func (p *Producer) Serve(ctx context.Context) error {
-
-	// Close...
-	defer func() {
-		p.Listener.Close()
-	}()
 
 	// Start Jobs on Server Start..
 	// TODO (??): defer this until a connection is made available,
@@ -107,12 +105,19 @@ func (p *Producer) Serve(ctx context.Context) error {
 	for {
 		// Accept Incoming Connections; Single threaded through here...
 		c, err := p.Listener.Accept()
-		log.WithFields(log.Fields{"Worker Addr": c.RemoteAddr().String()}).Debug("Attempted Connection")
 
-		if err != nil {
+		if c == nil {
+			continue // Handle for No connection Exists...
+		}
+
+		if (err != nil) && (c != nil) {
 			log.WithFields(log.Fields{"Error": err}).Error("Rejected Connection")
 			c.Close()
 		}
+
+		log.WithFields(
+			log.Fields{"Worker Addr": c.RemoteAddr().String()},
+		).Debug("Attempted Connection")
 
 		// Otherwise, Assign connection && increment - (Need Mutex??)
 		if !p.Sem.TryAcquire(1) {
@@ -141,8 +146,8 @@ func (p *Producer) Serve(ctx context.Context) error {
 			).Debug("New Connection")
 			go p.handleConnection(ctx, c)
 
-		case <-ctx.Done():
-			p.ShutDown(ctx)
+		case <-ctx.Done(): // If any location calls cancel
+			return nil
 		default:
 		}
 	}
@@ -156,7 +161,13 @@ func (p *Producer) Serve(ctx context.Context) error {
 // 		the context’s error, otherwise it returns any error returned from closing the Server’s
 // 		underlying Listener(s).
 // TODO: See above...
-func (p *Producer) ShutDown(ctx context.Context) {
+func (p *Producer) ShutDown(ctx context.Context, cancel context.CancelFunc) error {
+	cancel()
 	p.Listener.Close()
+	// This should Only Close If not alreay closed...
 	close(p.JobPool.JobChan)
+
+	p.NOpenConnections = 0
+
+	return nil
 }

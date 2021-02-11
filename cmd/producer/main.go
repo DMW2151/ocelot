@@ -29,24 +29,22 @@ var pConfig = &ocelot.ProducerConfig{
 	MaxConnections:   2,
 }
 
-var jobs = []*ocelot.Job{
-	{
+func newMock() *ocelot.Job {
+	return &ocelot.Job{
 		ID:          uuid.New(),
-		Interval:    time.Millisecond * 250,
+		Interval:    time.Millisecond * 3000,
 		Path:        "https://hello.com/en/index.html",
-		StagingChan: make(chan *ocelot.JobInstance, 2),
-	},
+		StagingChan: make(chan *ocelot.JobInstance, 0),
+	}
 }
 
-var newJob = ocelot.Job{
-	ID:          uuid.New(),
-	Interval:    time.Millisecond * 3000,
-	Path:        "https://www.holland.com/global/tourism.htm",
-	StagingChan: make(chan *ocelot.JobInstance, 2),
-}
+var jobs = make([]*ocelot.Job, 10)
 
-// Define Context
 func main() {
+	// Silly Create Jobs...Test Batch
+	for i := 0; i < 10; i++ {
+		jobs[i] = newMock()
+	}
 
 	// Set Cancel...
 	ctx, cancel := context.WithCancel(context.Background())

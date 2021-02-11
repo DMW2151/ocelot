@@ -69,7 +69,8 @@ func (j *Job) sendInstance() {
 // channel on a fixed interval
 func (j *Job) startSchedule(ctx context.Context) {
 
-	// Send first Job on server start; block subsequent sends with time.Ticker()
+	// Send first Job on server start + jitter to handle for batch (??)
+	// block subsequent sends with time.Ticker()
 	j.sendInstance()
 
 	j.ticker = time.NewTicker(j.Interval)

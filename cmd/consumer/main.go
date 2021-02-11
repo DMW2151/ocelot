@@ -17,15 +17,15 @@ func init() {
 	log.SetFormatter(customFormatter)
 	customFormatter.FullTimestamp = true
 
-	log.SetLevel(log.InfoLevel)
+	log.SetLevel(log.DebugLevel)
 
 }
 
 var (
 	wp = &ocelot.WorkParams{
-		NWorkers:    5,
+		NWorkers:    20,
 		MaxBuffer:   10,
-		Func:        handlers.HTTPSuccess,
+		Func:        handlers.S3Grab,
 		Host:        os.Getenv("OCELOT_HOST"),
 		Port:        os.Getenv("OCELOT_PORT"),
 		DialTimeout: time.Duration(time.Millisecond * 1000),

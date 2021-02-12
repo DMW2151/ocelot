@@ -6,10 +6,6 @@ import (
 	"encoding/gob"
 	"net"
 
-	//"os"
-	"fmt"
-	//"time"
-
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 )
@@ -50,6 +46,16 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 			"handlerType": handlerType,
 		},
 	).Info("New Connection")
+
+	if _, ok := p.JobPool.JobChan[handlerType]; !ok {
+		log.WithFields(
+			log.Fields{
+				"Worker Addr": c.RemoteAddr().String(),
+				"handlerType": handlerType,
+			},
+		).Info("No Jobs Available For Handler - Booting")
+		return //
+	}
 
 	// Create encoder for each open connection;
 	enc := gob.NewEncoder(c)
@@ -140,7 +146,7 @@ func (p *Producer) Serve(ctx context.Context) error {
 					"Permitted Conns": p.Config.MaxConnections,
 					"Current Conns":   p.NOpenConnections,
 				},
-			).Debug("Too Many Connections")
+			).Info("Too Many Connections")
 			c.Close()
 		} else {
 			// NOTE: Continue to use NOpenConnections for Debug;

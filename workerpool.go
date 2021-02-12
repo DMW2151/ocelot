@@ -4,7 +4,6 @@ package ocelot
 import (
 	"context"
 	"encoding/gob"
-	//"fmt"
 	"io"
 	"net"
 	"sync"
@@ -50,7 +49,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 		errChan   = make(chan error, 10)
 		j         JobInstance
 		dec       = gob.NewDecoder(*wp.Connection)
-		t         = time.NewTicker(time.Millisecond * 1500) // TESTING
+		t         = time.NewTicker(time.Millisecond * 60000) // TESTING
 		sessionID = uuid.New()
 	)
 
@@ -60,14 +59,18 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 	enc := gob.NewEncoder(*wp.Connection)
 	enc.Encode(&wp.Params.HandlerType)
 
-	errChan <- dec.Decode(&j)
+	// There we go...
+	go func() {
+		for {
+			errChan <- dec.Decode(&j)
+		}
+	}()
+
 	for {
-		// The Decoder reads data from server and unmarsals into a Job object
+		// The Decoder reads data from server and unmarshals into a Job object
 		// values from errChan will be nil
 		select {
 
-		default:
-			continue
 		case err := <-errChan:
 			if (err != nil) && (err != io.EOF) {
 				// Either Server Encoder buffer is off and cannot be recovered,
@@ -154,9 +157,9 @@ func (wp *WorkerPool) start(wg *sync.WaitGroup, sessionuuid uuid.UUID) {
 
 	defer wg.Done()
 
-	for j := range wp.Pending {
+	for ji := range wp.Pending {
 		// Do the Work; Call the Function...
-		err := wp.Params.Handler.Work(&j)
+		err := wp.Params.Handler.Work(&ji)
 
 		// Report Results to logs
 		if err != nil {
@@ -164,8 +167,8 @@ func (wp *WorkerPool) start(wg *sync.WaitGroup, sessionuuid uuid.UUID) {
 				log.Fields{
 					"Session ID":  sessionuuid,
 					"Error":       err,
-					"Job ID":      j.Job.ID,
-					"Instance ID": j.InstanceID,
+					"Job ID":      ji.Job.ID,
+					"Instance ID": ji.InstanceID,
 				},
 			).Error("Job Failed")
 			break
@@ -175,9 +178,9 @@ func (wp *WorkerPool) start(wg *sync.WaitGroup, sessionuuid uuid.UUID) {
 		log.WithFields(
 			log.Fields{
 				"Session ID":  sessionuuid,
-				"Job ID":      j.Job.ID,
-				"Instance ID": j.InstanceID,
-				"Duration":    -1 * j.CTime.Sub(time.Now()),
+				"Job ID":      ji.Job.ID,
+				"Instance ID": ji.InstanceID,
+				"Duration":    -1 * ji.CTime.Sub(time.Now()),
 			},
 		).Info("Job Success")
 	}

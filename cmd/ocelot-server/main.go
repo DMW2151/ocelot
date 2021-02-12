@@ -36,18 +36,4 @@ func main() {
 
 	p.Serve(ctx)
 
-	// CONSIDER THE BELOW AS A TEST SCENARIO FOR ADD/REMOVAL
-	go p.Serve(ctx)
-
-	time.Sleep(1000 * time.Millisecond)
-
-	p.JobPool.StartJob(
-		ctx,
-		&ocelot.Job{
-			ID:          uuid.New(),
-			Interval:    time.Millisecond * 1000,
-			Path:        "",
-			StagingChan: make(chan *ocelot.JobInstance),
-			Params:      map[string]interface{}{"type": "S3"},
-		})
 }

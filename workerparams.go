@@ -57,7 +57,7 @@ func (wpa *WorkParams) NewWorkerPool() (*WorkerPool, error) {
 	}
 
 	return &WorkerPool{
-		Connection: &c,
+		Connection: c,
 		Local:      c.LocalAddr().String(),
 		Remote:     c.RemoteAddr().String(),
 		Params:     wpa,

@@ -16,7 +16,7 @@ import (
 // WorkerPool - net.Conn with WorkParams attached. WorkParams
 // set channel buffering, concurrency, etc. of WorkerPool
 type WorkerPool struct {
-	Connection *net.Conn
+	Connection net.Conn
 	Local      string
 	Remote     string
 	Params     *WorkParams
@@ -50,7 +50,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 	var (
 		errChan   = make(chan error, 10)
 		j         JobInstance
-		dec       = gob.NewDecoder(*wp.Connection)
+		dec       = gob.NewDecoder(wp.Connection)
 		t         = time.NewTicker(time.Millisecond * 60000) // TESTING
 		sessionID = uuid.New()
 	)
@@ -58,7 +58,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 	wp.StartWorkers(sessionID)
 
 	// Send Initial Message To Server ...
-	enc := gob.NewEncoder(*wp.Connection)
+	enc := gob.NewEncoder(wp.Connection)
 	enc.Encode(&wp.Params.HandlerType)
 
 	// There we go...
@@ -143,7 +143,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 func (wp *WorkerPool) Close() {
 
 	// On close - Release Connection && Pool's Pending Channel
-	(*wp.Connection).Close()
+	wp.Connection.Close()
 	close(wp.Pending)
 
 	log.WithFields(

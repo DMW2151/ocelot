@@ -34,7 +34,7 @@ func main() {
 	// Start Empty Producer && Serve
 	p := defaultProducerConfig.NewProducer()
 
-	// p.Serve(ctx)
+	p.Serve(ctx)
 
 	// CONSIDER THE BELOW AS A TEST SCENARIO FOR ADD/REMOVAL
 	go p.Serve(ctx)
@@ -49,12 +49,6 @@ func main() {
 			Path:        "",
 			StagingChan: make(chan *ocelot.JobInstance),
 			Params:      map[string]interface{}{"type": "S3"},
-		})
+	})
 
-	time.Sleep(1000 * time.Millisecond)
-
-	p.JobPool.StopJob()
-
-	m := make(chan int)
-	<-m
-}
+	

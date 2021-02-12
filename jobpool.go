@@ -32,6 +32,7 @@ func (jp *JobPool) StopJob() {
 	// by FIFO...
 
 	j := jp.Jobs[0]
+	// Prevent mem leak; have GR exit...
 	j.ticker.Stop()
 	j.ticker = nil
 

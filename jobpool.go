@@ -10,7 +10,7 @@ import (
 // JobPool - Collection of Jobs Registered on the producer
 type JobPool struct {
 	Jobs    []*Job
-	JobChan chan *JobInstance
+	JobChan map[string]chan *JobInstance
 	wg      sync.WaitGroup
 }
 
@@ -47,7 +47,6 @@ func (jp *JobPool) gatherJobs() {
 		go func(j *Job) {
 			// Forward all incoming jobInstances and release
 			// the WaitGroup When j.StagingChan has been closed...
-
 			log.WithFields(
 				log.Fields{
 					"Job":      j.ID,
@@ -56,7 +55,8 @@ func (jp *JobPool) gatherJobs() {
 			).Info("New Job Registered")
 
 			for ji := range j.StagingChan {
-				jp.JobChan <- ji
+				// Route to correct channel...
+				jp.JobChan[ji.Job.Params["type"].(string)] <- ji
 			}
 			jp.wg.Done()
 		}(j)

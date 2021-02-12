@@ -1,5 +1,7 @@
 # Ocelot
 
+docker run -p 2151:2151 -d 181711657037
+
 ## Examples
 
 ### Sample Worker Setup

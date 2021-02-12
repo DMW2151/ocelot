@@ -4,6 +4,7 @@ package ocelot
 import (
 	"context"
 	"encoding/gob"
+	//"fmt"
 	"io"
 	"net"
 	"sync"
@@ -49,18 +50,24 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 		errChan   = make(chan error, 10)
 		j         JobInstance
 		dec       = gob.NewDecoder(*wp.Connection)
-		t         = time.NewTicker(time.Millisecond * 60000) // TESTING
+		t         = time.NewTicker(time.Millisecond * 1500) // TESTING
 		sessionID = uuid.New()
 	)
 
 	wp.StartWorkers(sessionID)
 
+	// Send Initial Message To Server ...
+	enc := gob.NewEncoder(*wp.Connection)
+	enc.Encode(&wp.Params.HandlerType)
+
+	errChan <- dec.Decode(&j)
 	for {
 		// The Decoder reads data from server and unmarsals into a Job object
 		// values from errChan will be nil
-		errChan <- dec.Decode(&j)
 		select {
 
+		default:
+			continue
 		case err := <-errChan:
 			if (err != nil) && (err != io.EOF) {
 				// Either Server Encoder buffer is off and cannot be recovered,
@@ -81,7 +88,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 						"Worker Addr":   (*wp.Connection).LocalAddr().String(),
 						"Producer Addr": (*wp.Connection).RemoteAddr().String(),
 					},
-				).Errorf("No Data Received")
+				).Error("No Data Received")
 				cancel()
 				return
 			}
@@ -121,7 +128,6 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 				},
 			).Warn("WorkerPool Timeout")
 			cancel()
-		default:
 		}
 
 	}

@@ -6,6 +6,10 @@ import (
 	"encoding/gob"
 	"net"
 
+	//"os"
+	"fmt"
+	//"time"
+
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 )
@@ -33,18 +37,31 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 		p.NOpenConnections--
 	}()
 
+	// TODO: Set Connection Type With First Message
+	// Flush & Then Proceed to route Jobs Properly
+	var handlerType string
+
+	dec := gob.NewDecoder(c)
+	_ = dec.Decode(&handlerType)
+
+	log.WithFields(
+		log.Fields{
+			"Worker Addr": c.RemoteAddr().String(),
+			"handlerType": handlerType,
+		},
+	).Info("New Connection")
+
 	// Create encoder for each open connection;
 	enc := gob.NewEncoder(c)
 
 	for {
 		select {
 		// Work is available from the Producer's ticks
-		case j := <-p.JobPool.JobChan:
+		case j := <-p.JobPool.JobChan[handlerType]:
 			// This worker was shutdown after reciving the job, but the
 			// connection was not yet closed. Send Jobs terminated by
 			// connection drop back into the queue, this will almost
 			// assuredly be an issue eventually
-
 			err := enc.Encode(&j)
 
 			if err != nil {
@@ -59,7 +76,7 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 				// Only put back in queue if this won't cause an infinite loop...
 				// I.e. There is another open connection to recieve this data...
 				if p.NOpenConnections > 1 {
-					p.JobPool.JobChan <- j
+					p.JobPool.JobChan[handlerType] <- j
 				}
 				return
 			}
@@ -80,18 +97,18 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 			).Error("Server Terminated - Got Kill Signal")
 			return
 
+		default:
+			continue
 		}
 	}
 }
 
 // Serve --
-// Reading: https://eli.thegreenplace.net/2020/graceful-shutdown-of-a-tcp-server-in-go/
-// TODO: Closed Connection Cannot be Reopened Warning...
 func (p *Producer) Serve(ctx context.Context) error {
 
-	// Start Jobs on Server Start..
-	// TODO (??): defer this until a connection is made available,
-	// prevents throttle on start...
+	var newConn = make(chan int, 1) // to manage communication
+
+	// Start Jobs on Server Start, prevents filled queues on start...
 	for _, j := range p.JobPool.Jobs {
 		go j.startSchedule(ctx)
 	}
@@ -99,15 +116,12 @@ func (p *Producer) Serve(ctx context.Context) error {
 	// Register Gather Operation for Intermediate Channels
 	p.JobPool.gatherJobs()
 
-	// Create two dummy channels to manage communication
-	newConn := make(chan int, 1)
-
 	for {
 		// Accept Incoming Connections; Single threaded through here...
 		c, err := p.Listener.Accept()
 
 		if c == nil {
-			continue // Handle for No connection Exists...
+			continue // Handle for No Connection Exists...
 		}
 
 		if (err != nil) && (c != nil) {
@@ -119,9 +133,8 @@ func (p *Producer) Serve(ctx context.Context) error {
 			log.Fields{"Worker Addr": c.RemoteAddr().String()},
 		).Debug("Attempted Connection")
 
-		// Otherwise, Assign connection && increment - (Need Mutex??)
+		// Otherwise, Assign connection && increment
 		if !p.Sem.TryAcquire(1) {
-			// Log Connection Pool Status...
 			log.WithFields(
 				log.Fields{
 					"Permitted Conns": p.Config.MaxConnections,
@@ -130,24 +143,21 @@ func (p *Producer) Serve(ctx context.Context) error {
 			).Debug("Too Many Connections")
 			c.Close()
 		} else {
-			// NOTE: Continue to use NOpenConnections for Debug; Should Always
-			// be in line w. Sempahore.size...
+			// NOTE: Continue to use NOpenConnections for Debug;
+			// Should be same as Sempahore.size...
 			p.OpenConnections[p.NOpenConnections] = &c
 			p.NOpenConnections++
 			newConn <- 1
 		}
 
-		// Chose one of the following cases && handle as such
-		// or context close
+		// Chose one of the following cases && handle
 		select {
 		case <-newConn:
-			log.WithFields(
-				log.Fields{"Worker Addr": c.RemoteAddr().String()},
-			).Debug("New Connection")
 			go p.handleConnection(ctx, c)
 
-		case <-ctx.Done(): // If any location calls cancel
+		case <-ctx.Done(): // Exit if cancelled..
 			return nil
+
 		default:
 		}
 	}
@@ -164,8 +174,12 @@ func (p *Producer) Serve(ctx context.Context) error {
 func (p *Producer) ShutDown(ctx context.Context, cancel context.CancelFunc) error {
 	cancel()
 	p.Listener.Close()
-	// This should Only Close If not alreay closed...
-	close(p.JobPool.JobChan)
+
+	// This should Only Close If not alreay closed??
+	// Close all Channels...
+	for _, v := range p.JobPool.JobChan {
+		close(v)
+	}
 
 	p.NOpenConnections = 0
 

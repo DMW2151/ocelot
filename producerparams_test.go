@@ -76,7 +76,7 @@ func TestProducerParams_NewProducer(t *testing.T) {
 		MaxConnections:   1,
 	}
 
-	p := pConfig.NewProducer(jobs)
+	p := pConfig.NewProducer()
 
 	// Check Listen Address, TODO: Bad Test - Fix...
 	if p.Listener.Addr().String() == "" {

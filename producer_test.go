@@ -27,7 +27,7 @@ func TestProducer_ShutDown(t *testing.T) {
 			timeout     = time.NewTimer(time.Millisecond * 1200)
 		)
 
-		p := pConfig.NewProducer([]*Job{})
+		p := pConfig.NewProducer()
 
 		go func() {
 			time.Sleep(1 * time.Second)
@@ -47,7 +47,7 @@ func TestProducer_ShutDown(t *testing.T) {
 
 	t.Run("Check Shutdown Closes All Connections", func(t *testing.T) {
 
-		p := pConfig.NewProducer([]*Job{})
+		p := pConfig.NewProducer()
 
 		var (
 			ctx, cancel = context.WithCancel(context.Background())

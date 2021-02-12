@@ -2,9 +2,11 @@
 package ocelot
 
 import (
-	ocelot "github.com/dmw2151/ocelot"
+	"fmt"
 	"math/rand"
 	"time"
+
+	ocelot "github.com/dmw2151/ocelot"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -18,20 +20,20 @@ type S3Handler struct {
 }
 
 // Work - Required to Implement Handler Interface
+// WARNING: DO NOT KEEP THIS!!
 func (sh *S3Handler) Work(ji *ocelot.JobInstance) error {
+	return nil
 	var err error
 
 	// Init Service on reach Req, Recycle Underlying Session
-	svc := s3.New(
-		session.Must(sh.Client, err),
-	)
+	svc := s3.New(session.Must(sh.Client, err))
 
 	// In this case; the values in ji.Job.Params take precidence
 	// over ji.Job.Path
 	output, err := svc.GetObject(
 		&s3.GetObjectInput{
-			Bucket: aws.String(ji.Job.Params["Bucket"].(string)),
-			Key:    aws.String(ji.Job.Params["Key"].(string)),
+			Bucket: aws.String(ji.Job.Params["bucket"].(string)),
+			Key:    aws.String(ji.Job.Params["key"].(string)),
 		},
 	)
 
@@ -40,8 +42,8 @@ func (sh *S3Handler) Work(ji *ocelot.JobInstance) error {
 		return err
 	}
 
-	// Other Logic Implemented here...
-	log.Infof("Downloaded: %d Bytes", output.ContentLength)
+	// Other Logic Implemented here; why did this spit out...
+	log.Info(fmt.Sprint(*output.ContentLength))
 	return nil
 }
 

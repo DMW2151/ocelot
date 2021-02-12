@@ -17,6 +17,9 @@ type JobHandler interface {
 
 // WorkParams is a factory struct for WorkerPools
 type WorkParams struct {
+	// Name of Handler...
+	HandlerType string
+
 	// Number of goroutines to launch taking work
 	NWorkers int
 

@@ -1,0 +1,14 @@
+job_channel_buffer: 0
+max_connections: 2
+
+jobs:
+  -
+    id: 00000000-0000-0000-0000-000000000001
+    interval: 8000ms
+    path: www.fake.com/path/to/fake/resource.html
+    params:
+      type: S3
+      bucket: ocelot-cctv
+      key: Screen Shot 2020-12-07 at 8.09.20 PM.png
+
+  

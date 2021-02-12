@@ -105,6 +105,9 @@ func (j *Job) startSchedule(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
+			if j.ticker == nil {
+				return
+			}
 		}
 	}
 }

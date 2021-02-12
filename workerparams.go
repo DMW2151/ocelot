@@ -58,6 +58,8 @@ func (wpa *WorkParams) NewWorkerPool() (*WorkerPool, error) {
 
 	return &WorkerPool{
 		Connection: &c,
+		Local:      c.LocalAddr().String(),
+		Remote:     c.RemoteAddr().String(),
 		Params:     wpa,
 		Pending:    make(chan JobInstance, wpa.MaxBuffer),
 	}, nil

@@ -33,6 +33,7 @@ func (jp *JobPool) StopJob() {
 
 	j := jp.Jobs[0]
 	j.ticker.Stop()
+	j.ticker = nil
 
 	log.WithFields(
 		log.Fields{"Job": j.ID},

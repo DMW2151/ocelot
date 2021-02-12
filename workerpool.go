@@ -17,6 +17,8 @@ import (
 // set channel buffering, concurrency, etc. of WorkerPool
 type WorkerPool struct {
 	Connection *net.Conn
+	Local      string
+	Remote     string
 	Params     *WorkParams
 	Pending    chan JobInstance
 }
@@ -34,8 +36,8 @@ func (wp *WorkerPool) StartWorkers(sessionuuid uuid.UUID) {
 	log.WithFields(
 		log.Fields{
 			"Session ID":    sessionuuid,
-			"Worker Addr":   (*wp.Connection).LocalAddr().String(),
-			"Producer Addr": (*wp.Connection).RemoteAddr().String(),
+			"Worker Addr":   wp.Local,
+			"Producer Addr": wp.Remote,
 		},
 	).Debugf("Started %d Workers", wp.Params.NWorkers)
 
@@ -88,8 +90,8 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 					log.Fields{
 						"Error":         err,
 						"Session ID":    sessionID,
-						"Worker Addr":   (*wp.Connection).LocalAddr().String(),
-						"Producer Addr": (*wp.Connection).RemoteAddr().String(),
+						"Worker Addr":   wp.Local,
+						"Producer Addr": wp.Remote,
 					},
 				).Error("No Data Received")
 				cancel()
@@ -113,8 +115,8 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 			log.WithFields(
 				log.Fields{
 					"Session ID":    sessionID,
-					"Worker Addr":   (*wp.Connection).LocalAddr().String(),
-					"Producer Addr": (*wp.Connection).RemoteAddr().String(),
+					"Worker Addr":   wp.Local,
+					"Producer Addr": wp.Remote,
 				},
 			).Warn("WorkerPool Shutdown")
 			wp.Close()
@@ -126,8 +128,8 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 			log.WithFields(
 				log.Fields{
 					"Session ID":    sessionID,
-					"Worker Addr":   (*wp.Connection).LocalAddr().String(),
-					"Producer Addr": (*wp.Connection).RemoteAddr().String(),
+					"Worker Addr":   wp.Local,
+					"Producer Addr": wp.Remote,
 				},
 			).Warn("WorkerPool Timeout")
 			cancel()
@@ -146,8 +148,8 @@ func (wp *WorkerPool) Close() {
 
 	log.WithFields(
 		log.Fields{
-			"Worker Addr":   (*wp.Connection).LocalAddr().String(),
-			"Producer Addr": (*wp.Connection).RemoteAddr().String(),
+			"Worker Addr":   wp.Local,
+			"Producer Addr": wp.Remote,
 		},
 	).Warn("Connection Closed")
 }

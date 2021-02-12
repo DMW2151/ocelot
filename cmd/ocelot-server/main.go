@@ -50,6 +50,11 @@ func main() {
 			StagingChan: make(chan *ocelot.JobInstance),
 			Params:      map[string]interface{}{"type": "S3"},
 		})
+
+	time.Sleep(1000 * time.Millisecond)
+
+	p.JobPool.StopJob()
+
 	m := make(chan int)
 	<-m
 }

@@ -49,6 +49,5 @@ func main() {
 			Path:        "",
 			StagingChan: make(chan *ocelot.JobInstance),
 			Params:      map[string]interface{}{"type": "S3"},
-	})
-
-	
+		})
+}

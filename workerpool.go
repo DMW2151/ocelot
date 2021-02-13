@@ -47,7 +47,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 		errChan   = make(chan error, 10)
 		j         JobInstance
 		dec       = gob.NewDecoder(wp.Connection)
-		t         = time.NewTicker(time.Millisecond * 12000) // TESTING
+		t         = time.NewTicker(time.Millisecond * 15000) // TESTING
 		sessionID = uuid.New()
 	)
 
@@ -60,7 +60,12 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 	// There we go...
 	go func() {
 		for {
-			errChan <- dec.Decode(&j)
+			select {
+			case <-ctx.Done():
+				return
+			case errChan <- dec.Decode(&j):
+				log.Println("Heree...") // WARNING!: WorkerPool is Still Recieving Jobs after Shutdowm...
+			}
 		}
 	}()
 
@@ -81,7 +86,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 			if err == io.EOF { // Server has shutdown (or otherwise recieves no data recieved)
 				log.WithFields(
 					log.Fields{"Session ID": sessionID},
-				).Errorf("No Data Received: %e")
+				).Errorf("No Data Received: %v", err)
 				cancel()
 				return
 			}
@@ -99,7 +104,6 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 
 		// Recieves a Cancelfunc() call; either from the case(s) above or user
 		case <-ctx.Done():
-
 			log.WithFields(
 				log.Fields{
 					"Session ID":    sessionID,

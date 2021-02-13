@@ -23,6 +23,55 @@ type Producer struct {
 	NOpenConnections int
 }
 
+func decodeOneMesage(c net.Conn) (msg string, err error) {
+	dec := gob.NewDecoder(c)
+	err = dec.Decode(&msg)
+	if err != nil {
+		return "", err
+	}
+	return msg, nil
+}
+
+func (p *Producer) checkHandlerExists(msg string) bool {
+	_, ok := p.JobPool.JobChan[msg]
+	return ok
+}
+
+func (p *Producer) handleJobStatusResponses(ctx context.Context, c net.Conn) {
+	// for {
+	// 	var ji = JobInstance{}
+	// 	_ = decNew.Decode(&ji)
+	// 	select {
+	// 	default:
+	// 		if ji.InstanceID != uuid.Nil {
+	// 			// Exit
+	// 		}
+	// 	case <-ctx.Done():
+	// 		return
+	// 	}
+	// }
+
+	decNew := gob.NewDecoder(c)
+
+	for {
+		var ji = JobInstance{}
+		_ = decNew.Decode(&ji)
+
+		if ji.InstanceID != uuid.Nil {
+			log.WithFields(
+				log.Fields{
+					"Instance ID": ji.InstanceID,
+					"Job ID":      ji.Job.ID,
+				},
+			).Info("Job Finished")
+		} else {
+			decNew = nil
+			return
+		}
+
+	}
+}
+
 // handleConnection - Handles incoming connections from workers
 // Forwards jobInstances from the Producer's JobsChan to a worker. Encodes
 // jobs using `gob` and sends jobInstance over TCP conn.
@@ -38,101 +87,59 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 
 	// TODO: Set Connection Type With First Message
 	// Flush & Then Proceed to route Jobs Properly
-	var handlerType string
-
-	dec := gob.NewDecoder(c)
-	_ = dec.Decode(&handlerType)
-
-	log.WithFields(
-		log.Fields{
-			"Worker Addr": c.RemoteAddr().String(),
-			"handlerType": handlerType,
-		},
-	).Info("New Connection")
-
-	if _, ok := p.JobPool.JobChan[handlerType]; !ok {
-		log.WithFields(
-			log.Fields{
-				"Worker Addr": c.RemoteAddr().String(),
-				"handlerType": handlerType,
-			},
-		).Info("No Jobs Available For Handler - Booting")
-		return //
+	handlerType, err := decodeOneMesage(c)
+	if err != nil {
+		log.Warnf("Error on Decode Handler Type %v", err)
 	}
 
-	go func() {
-		decNew := gob.NewDecoder(c)
-		for {
-			var ji = JobInstance{}
-			_ = decNew.Decode(&ji)
-			select {
+	if !p.checkHandlerExists(handlerType) {
+		log.Warnf("Handler Does Not Have Any Workers - Booting")
+		return
+	}
 
-			default:
-				if ji.InstanceID != uuid.Nil {
-					log.WithFields(
-						log.Fields{
-							"Instance ID": ji.InstanceID,
-							"Job ID":      ji.Job.ID,
-						},
-					).Info("Job Finished")
-				}
-
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	go p.handleJobStatusResponses(ctx, c)
 
 	// Create encoder for each open connection;
 	enc := gob.NewEncoder(c)
 
 	for {
-		select {
-
 		// Work is available from the Producer's ticks
-		case j := <-p.JobPool.JobChan[handlerType]:
-			// This worker was shutdown after reciving the job, but the
-			// connection was not yet closed. Send Jobs terminated by
-			// connection drop back into the queue, this will almost
-			// assuredly be an issue eventually
-			err := enc.Encode(&j)
+		j := <-p.JobPool.JobChan[handlerType]
 
-			if err != nil {
-				log.WithFields(
-					log.Fields{
-						"Error":       err,
-						"Job ID":      j.Job.ID,
-						"Instance ID": j.InstanceID,
-					},
-				).Warnf("Failed to Dispatch Job - Worker Timeout (??) Retrying")
-
-				// Only put back in queue if this won't cause an infinite loop...
-				// I.e. There is another open connection to recieve this data...
-				if p.NOpenConnections > 1 {
-					p.JobPool.JobChan[handlerType] <- j
-				}
-				return
-			}
-
-			log.WithFields(
-				log.Fields{
-					"Worker Addr": c.RemoteAddr().String(),
-					"Job ID":      j.Job.ID,
-					"Instance ID": j.InstanceID,
-				},
-			).Debug("Dispatched Job")
-
-		// Producer shutdown, exit gracefully by closing outstandig
-		// conections etc.
+		select {
 		case <-ctx.Done():
 			log.WithFields(
 				log.Fields{"Producer Addr": c.LocalAddr().String()},
 			).Error("Server Terminated - Got Kill Signal")
 			return
-
 		default:
-			continue
+			break
 		}
+
+		err := enc.Encode(&j)
+		if err != nil {
+			log.WithFields(
+				log.Fields{
+					"Job ID":      j.Job.ID,
+					"Instance ID": j.InstanceID,
+				},
+			).Warnf("Failed to Dispatch Job - Worker Timeout (??) Retrying")
+
+			// Only put back in queue if this won't cause an infinite loop...
+			// I.e. There is another open connection to recieve this data...
+			if p.NOpenConnections > 1 {
+				p.JobPool.JobChan[handlerType] <- j
+			}
+			return
+		}
+
+		log.WithFields(
+			log.Fields{
+				"Job ID":      j.Job.ID,
+				"Instance ID": j.InstanceID,
+			},
+		).Debug("Dispatched Job")
+
 	}
 }
 
@@ -162,10 +169,6 @@ func (p *Producer) Serve(ctx context.Context) error {
 			c.Close()
 		}
 
-		log.WithFields(
-			log.Fields{"Worker Addr": c.RemoteAddr().String()},
-		).Debug("Attempted Connection")
-
 		// Otherwise, Assign connection && increment
 		if !p.Sem.TryAcquire(1) {
 			log.WithFields(
@@ -184,15 +187,7 @@ func (p *Producer) Serve(ctx context.Context) error {
 		}
 
 		// Chose one of the following cases && handle
-		select {
-		case <-newConn:
-			go p.handleConnection(ctx, c)
-
-		case <-ctx.Done(): // Exit if cancelled..
-			return nil
-
-		default:
-		}
+		go p.handleConnection(ctx, c)
 	}
 }
 

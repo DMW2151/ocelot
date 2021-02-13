@@ -105,31 +105,6 @@ func (j *Job) startSchedule(ctx context.Context) {
 			j.sendInstance()
 		case <-ctx.Done():
 			return
-		default:
-			if j.ticker == nil {
-				return
-			}
 		}
-	}
-}
-
-// flushChannel - Helper function for test teardown.
-func (j *Job) flushChannel() {
-	for {
-		select {
-		case <-j.StagingChan:
-		default:
-			return
-		}
-	}
-}
-
-// newMock - Helper function for mocking many jobs
-func newMock() *Job {
-	return &Job{
-		ID:          uuid.New(),
-		Interval:    time.Millisecond * 3000,
-		Path:        "https://hello.com/en/index.html",
-		StagingChan: make(chan *JobInstance, 0),
 	}
 }

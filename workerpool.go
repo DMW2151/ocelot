@@ -24,21 +24,17 @@ type WorkerPool struct {
 }
 
 // StartWorkers - Start Workers, runs `wp.Params.NWorkers`
-func (wp *WorkerPool) StartWorkers(sessionuuid uuid.UUID) {
+func (wp *WorkerPool) StartWorkers(ctx context.Context, sessionuuid uuid.UUID) {
 
 	var wg sync.WaitGroup
 
 	wg.Add(wp.Params.NWorkers)
 	for i := 0; i < wp.Params.NWorkers; i++ {
-		go wp.start(&wg, sessionuuid)
+		go wp.start(ctx, &wg, sessionuuid)
 	}
 
 	log.WithFields(
-		log.Fields{
-			"Session ID":    sessionuuid,
-			"Worker Addr":   wp.Local,
-			"Producer Addr": wp.Remote,
-		},
+		log.Fields{"Session ID": sessionuuid},
 	).Debugf("Started %d Workers", wp.Params.NWorkers)
 
 	go func() { wg.Wait() }()
@@ -51,11 +47,11 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 		errChan   = make(chan error, 10)
 		j         JobInstance
 		dec       = gob.NewDecoder(wp.Connection)
-		t         = time.NewTicker(time.Millisecond * 60000) // TESTING
+		t         = time.NewTicker(time.Millisecond * 12000) // TESTING
 		sessionID = uuid.New()
 	)
 
-	wp.StartWorkers(sessionID)
+	wp.StartWorkers(ctx, sessionID)
 
 	// Send Initial Message To Server ...
 	enc := gob.NewEncoder(wp.Connection)
@@ -74,26 +70,18 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 		select {
 
 		case err := <-errChan:
+			// Either Server Encoder buffer is off and cannot be recovered,
+			// or Client has been closed and buffer is incomplete -> Cancel & Exit
 			if (err != nil) && (err != io.EOF) {
-				// Either Server Encoder buffer is off and cannot be recovered,
-				// or Client has been closed and buffer is incomplete -> Cancel & Exit
-				log.WithFields(
-					log.Fields{"Err": err},
-				).Error("Failed to Unmarshal Job From Server")
+				log.Errorf("Failed to Unmarshal Job From Server: %e", err)
 				cancel()
 				return
 			}
 
-			if err == io.EOF {
-				// Server has shutdown (or otherwise recieves no data recieved)
+			if err == io.EOF { // Server has shutdown (or otherwise recieves no data recieved)
 				log.WithFields(
-					log.Fields{
-						"Error":         err,
-						"Session ID":    sessionID,
-						"Worker Addr":   wp.Local,
-						"Producer Addr": wp.Remote,
-					},
-				).Error("No Data Received")
+					log.Fields{"Session ID": sessionID},
+				).Errorf("No Data Received: %e")
 				cancel()
 				return
 			}
@@ -155,9 +143,11 @@ func (wp *WorkerPool) Close() {
 }
 
 // start - Execute the Worker
-func (wp *WorkerPool) start(wg *sync.WaitGroup, sessionuuid uuid.UUID) {
+func (wp *WorkerPool) start(ctx context.Context, wg *sync.WaitGroup, sessionuuid uuid.UUID) {
 
 	defer wg.Done()
+
+	enc := gob.NewEncoder(wp.Connection)
 
 	for ji := range wp.Pending {
 		// Do the Work; Call the Function...
@@ -165,25 +155,27 @@ func (wp *WorkerPool) start(wg *sync.WaitGroup, sessionuuid uuid.UUID) {
 
 		// Report Results to logs
 		if err != nil {
-			log.WithFields(
-				log.Fields{
-					"Session ID":  sessionuuid,
-					"Error":       err,
-					"Job ID":      ji.Job.ID,
-					"Instance ID": ji.InstanceID,
-				},
-			).Error("Job Failed")
-			break
+			ji.Success = false
+		} else {
+			ji.Success = true
 		}
 
-		// Log success...
 		log.WithFields(
 			log.Fields{
-				"Session ID":  sessionuuid,
 				"Job ID":      ji.Job.ID,
 				"Instance ID": ji.InstanceID,
-				"Duration":    -1 * ji.CTime.Sub(time.Now()),
+				"Success":     ji.Success,
 			},
-		).Info("Job Success")
+		).Info("Encoding...")
+
+		// Write back to server; sends whenever job is done...
+		// Shouldn't encode multiple jobs before read...
+		select {
+		default:
+			enc.Encode(&ji)
+		case <-ctx.Done():
+			enc = nil
+		}
+
 	}
 }

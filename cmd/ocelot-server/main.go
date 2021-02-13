@@ -3,11 +3,8 @@ package main
 import (
 	"context"
 	"flag"
-	"time"
 
-	"github.com/dmw2151/ocelot"
 	utils "github.com/dmw2151/ocelot/internal/utils"
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
 

@@ -39,6 +39,7 @@ type JobInstance struct {
 	InstanceID uuid.UUID // Randomly generated UUID for each instance,
 	CTime      time.Time // Instance Create Time
 	Job        Job
+	Success    bool
 }
 
 // FromConfig -

@@ -4,8 +4,11 @@ package ocelot
 import (
 	"context"
 	"encoding/gob"
+
+	//"io"
 	"net"
 
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 )
@@ -57,11 +60,35 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 		return //
 	}
 
+	go func() {
+		decNew := gob.NewDecoder(c)
+		for {
+			var ji = JobInstance{}
+			_ = decNew.Decode(&ji)
+			select {
+
+			default:
+				if ji.InstanceID != uuid.Nil {
+					log.WithFields(
+						log.Fields{
+							"Instance ID": ji.InstanceID,
+							"Job ID":      ji.Job.ID,
+						},
+					).Info("Job Finished")
+				}
+
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	// Create encoder for each open connection;
 	enc := gob.NewEncoder(c)
 
 	for {
 		select {
+
 		// Work is available from the Producer's ticks
 		case j := <-p.JobPool.JobChan[handlerType]:
 			// This worker was shutdown after reciving the job, but the

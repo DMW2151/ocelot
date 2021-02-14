@@ -4,16 +4,14 @@ package ocelot
 import (
 	"context"
 	"encoding/gob"
-	"fmt"
 	"net"
 	"time"
 
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 )
 
-// Producer - Object that Manages the Job-Side
+// Producer - Object that Manages the Scheduler/Producer/Server
 type Producer struct {
 	// Listener, to accept incoming connections
 	listener net.Listener
@@ -36,6 +34,8 @@ type Producer struct {
 }
 
 // decodeOneMesage - decode a single message from a connection
+// Opens new decoder on a connection and returns one and only
+// one message
 func decodeOneMesage(c net.Conn) (msg string, err error) {
 	dec := gob.NewDecoder(c)
 	err = dec.Decode(&msg)
@@ -45,20 +45,18 @@ func decodeOneMesage(c net.Conn) (msg string, err error) {
 	return msg, nil
 }
 
-// pokeEncoder - Poke Encoder to Ensure Is Valid.
-func pokeDecoder(e *gob.Decoder, v interface{}) error {
-	return e.Decode(v)
-}
-
+// checkHandlerExists - does O(1) lookup to the JobChannels
+// returns true if key exists
 func (p *Producer) checkHandlerExists(msg string) bool {
 	_, ok := p.jobPool.JobChan[msg]
 	return ok
 }
 
+// validateConnection - Handles incoming connections before
+// any work is assigned, rejects if server full
 func (p *Producer) validateConnection(c net.Conn) bool {
 	if p.sem.TryAcquire(1) {
 		p.openConnections[p.nConn] = &c
-		p.nConn++
 		return true
 	}
 
@@ -67,28 +65,28 @@ func (p *Producer) validateConnection(c net.Conn) bool {
 			"Permitted Conns": p.config.MaxConn,
 			"Current Conns":   p.nConn,
 		},
-	).Info("Rejected Connection - Too Many Connections")
+	).Debug("Rejected Connection - Too Many Connections")
 	c.Close()
 	return false
 }
 
+// terminateConnection - Teardown for a connection; decriment
+// count, release sem, and close connection
 func (p *Producer) terminateConnection(c net.Conn) {
-	log.Warn("Worker Connection Being Terminated...")
 	p.sem.Release(1)
 	p.nConn--
 	c.Close()
+	log.Warn("Worker Connection Being Terminated...")
 }
 
 // handleConnection - Handles incoming connections from workers
-// Forwards jobInstances from the Producer's JobsChan to a worker. Encodes
-// jobs using `gob` and sends jobInstance over TCP conn.
+// Forwards jobInstances from JobChan to a worker.
 func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 
 	defer p.terminateConnection(c)
 
-	// First, recieve message from worker indicating what its
-	// attached handler is; then route jobs based on the recieved
-	// handler name
+	// First, recieve message from worker indicating what worker's
+	// handler is; route jobs based on the recieved handler name
 	handlerType, err := decodeOneMesage(c)
 	if err != nil {
 		log.Warnf("Error on Decode Handler Type %v", err)
@@ -101,45 +99,48 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 		return
 	}
 
-	// Create an encoder to send job Instances over the wire
-	// create a minmal representation of the Instance struct
-	// to test the connection on each send...
-	//var canary JobInstance
-
-	var canary struct {
-		InstanceID uuid.UUID
-	}
-
-	dec := gob.NewDecoder(c)
+	// Create a new encoder to send job Instances over the wire
+	// as reecieved
 	enc := gob.NewEncoder(c)
+
+	// TODO: This is unneeded overhead, find way to exclude this.
+	// Create a minmal representation of the Instance struct to test
+	// the decoder before sending a job. Do not want to dispatch a job
+	// to a worker that's unable to recieve
+	dec := gob.NewDecoder(c)
+
+	// 1 Byte Struct "canary" is minimum struct that shares vals w. JobInstance
+	var canary struct {
+		Success bool
+	}
 
 	for {
 		select {
 
+		// On Cancel, exit this (and all other) open connections
 		case <-ctx.Done():
-			// On Cancel, exit this (and all other) open connections
 			log.WithFields(
 				log.Fields{"Producer Addr": c.LocalAddr().String()},
 			).Error("Server Terminated - Got Kill Signal")
 			return
 
+		// On recieve tick
 		case j := <-p.jobPool.JobChan[handlerType]:
-			// Canary Read Precedes Each Attempted Write...
+
+			// Test read the value on the connection into canary,
+			// Expect this to return no value
 			c.SetReadDeadline(time.Now().Add(time.Millisecond * 10))
-			if err := pokeDecoder(dec, &canary); err != nil {
+			if err := dec.Decode(&canary); err != nil {
 				if netError, ok := err.(net.Error); ok && netError.Timeout() {
 					log.WithFields(
 						log.Fields{
 							"Instance ID": j.InstanceID,
-							"Job":         fmt.Sprintf("%+v", canary),
 						},
 					).Tracef("Canary Read Timeout: %v", err)
-
 				} else { // Some other error....
 					log.WithFields(
 						log.Fields{
 							"Instance ID": j.InstanceID,
-							"Job":         fmt.Sprintf("%+v", canary),
 						},
 					).Warnf("Canary Read Failed (Retry): %v", err)
 					p.jobPool.JobChan[handlerType] <- j
@@ -147,24 +148,20 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 				}
 			}
 
-			// if canary.InstanceID.String() == "d5b0e6d3-523b-46cc-ad39-8a345acea4cb" {
-			// 	log.Infof("Canary Did It's Job: %v", canary)
-			// 	return
-			// }
-
 			// Encode and send jobInstance - Real....
 			err = enc.Encode(&j)
 			log.WithFields(
 				log.Fields{"Instance ID": j.InstanceID},
-			).Debugf("Dispatched Job: %v", err)
-			// if err != nil {
-			// 	// If there is an error, recycle this job back into the channel
-			// 	log.WithFields(
-			// 		log.Fields{"Instance ID": j.InstanceID},
-			// 	).Warnf("Failed to Dispatch Job (Retrying): %v ", err)
-			// 	p.jobPool.JobChan[handlerType] <- j
-			// 	return
-			// }
+			).Info("Dispatched Job")
+
+			if err != nil {
+				// If there is an error, recycle this job back into the channel
+				log.WithFields(
+					log.Fields{"Instance ID": j.InstanceID},
+				).Warnf("Failed to Dispatch Job (Retrying): %v ", err)
+				p.jobPool.JobChan[handlerType] <- j
+				return
+			}
 
 		}
 

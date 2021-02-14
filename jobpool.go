@@ -37,10 +37,9 @@ func (jp *JobPool) Forward(j *Job) {
 	// Route to correct channel based on handlerType; cannot close this
 	// when just one job closes...
 	for ji := range j.stgCh {
-		log.Println()
 		log.WithFields(
 			log.Fields{"Job ID": j.ID, "Instance ID": ji.InstanceID},
-		).Debug("JobInstance Created")
+		).Trace("JobInstance Created")
 		jp.JobChan[j.Params["type"].(string)] <- ji
 	}
 }

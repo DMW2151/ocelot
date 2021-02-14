@@ -4,7 +4,6 @@ package ocelot
 import (
 	"context"
 	"encoding/gob"
-	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -67,7 +66,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 
 				case *net.OpError:
 					if t.Op == "read" {
-						log.Errorf("Halt on Op Error: %v", err)
+						log.Errorf("Halt Worker on Op Error: %v", err)
 						dec = nil
 						close(errChan)
 						return
@@ -75,16 +74,11 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 				}
 			}
 
-			if err == io.EOF {
-				continue
-			}
-
 			log.WithFields(
 				log.Fields{
 					"Instance ID": j.InstanceID,
-					"Job":         fmt.Sprintf("%+v", j),
 				},
-			).Debugf("Worker Read Job: %v", err)
+			).Tracef("Worker Read Job: %v", err)
 			errChan <- err
 		}
 	}()
@@ -105,13 +99,13 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 			}
 
 			// Server has shutdown (or otherwise sent no data)
-			// if err == io.EOF {
-			// 	log.WithFields(
-			// 		log.Fields{"Session ID": sessionID},
-			// 	).Errorf("Connection Closed Via Server: %v, %v", err, j)
-			// 	cancel()
-			// 	return
-			// }
+			if err == io.EOF {
+				log.WithFields(
+					log.Fields{"Session ID": sessionID},
+				).Errorf("Connection Closed Via Server: %v, %v", err, j)
+				cancel()
+				return
+			}
 			// No Errors -> Send Job to WorkerPool
 			wp.Pending <- j
 
@@ -120,6 +114,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 			log.WithFields(
 				log.Fields{"Session ID": sessionID},
 			).Warn("WorkerPool Shutdown")
+			wp.Close()
 			return
 
 		// TESTING: Workers recieve remaining jobs, depending on the buffer size,
@@ -129,17 +124,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 				log.Fields{"Session ID": sessionID},
 			).Warn("WorkerPool Timeout")
 
-			// canaryUUID, _ := uuid.Parse("d5b0e6d3-523b-46cc-ad39-8a345acea4cb")
-			// var canary = &JobInstance{
-			// 	InstanceID: canaryUUID,
-			// }
-
-			// enc.Encode(canary)
-
 			cancel()
-			//close(errChan)
-			wp.Close()
-
 		}
 
 	}

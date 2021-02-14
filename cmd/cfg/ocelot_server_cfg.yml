@@ -1,5 +1,6 @@
 job_channel_buffer: 0
 max_connections: 2
+listen_addr: ${OCELOT_LISTEN_ADDR}
 
 jobs:
   -

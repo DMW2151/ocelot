@@ -10,7 +10,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/dmw2151/ocelot"
 	handlers "github.com/dmw2151/ocelot/internal/handlers"
-	utils "github.com/dmw2151/ocelot/internal/utils"
 	"github.com/pkg/profile"
 	log "github.com/sirupsen/logrus"
 )
@@ -50,10 +49,9 @@ func init() {
 func main() {
 
 	defer profile.Start().Stop()
-	defaultProducerConfig := utils.OpenYaml("./cmd/cfg/ocelot_server_cfg.yml")
 
 	// Start Empty Producer && Serve
-	p := defaultProducerConfig.NewProducer()
+	p := ocelot.NewProducer("./cmd/cfg/ocelot_server_cfg.yml")
 
 	go func() {
 		time.Sleep(time.Millisecond * 100)

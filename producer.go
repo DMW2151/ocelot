@@ -8,6 +8,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 )
@@ -105,11 +106,10 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 	// to test the connection on each send...
 	//var canary JobInstance
 
-	var canary = &JobInstance{
-		InstanceID: [16]byte{},
-		CTime:      time.Time{},
-		Success:    false,
+	var canary struct {
+		InstanceID uuid.UUID
 	}
+
 	dec := gob.NewDecoder(c)
 	enc := gob.NewEncoder(c)
 
@@ -141,14 +141,16 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 							"Instance ID": j.InstanceID,
 							"Job":         fmt.Sprintf("%+v", canary),
 						},
-					).Warnf("Canary Read Failed: %v", err)
+					).Warnf("Canary Read Failed (Retry): %v", err)
+					p.jobPool.JobChan[handlerType] <- j
+					return
 				}
 			}
 
-			if canary.InstanceID.String() == "d5b0e6d3-523b-46cc-ad39-8a345acea4cb" {
-				log.Infof("Canary Did It's Job: %v", canary)
-				return
-			}
+			// if canary.InstanceID.String() == "d5b0e6d3-523b-46cc-ad39-8a345acea4cb" {
+			// 	log.Infof("Canary Did It's Job: %v", canary)
+			// 	return
+			// }
 
 			// Encode and send jobInstance - Real....
 			err = enc.Encode(&j)

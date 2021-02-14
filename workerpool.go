@@ -129,12 +129,12 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 				log.Fields{"Session ID": sessionID},
 			).Warn("WorkerPool Timeout")
 
-			canaryUUID, _ := uuid.Parse("d5b0e6d3-523b-46cc-ad39-8a345acea4cb")
-			var canary = &JobInstance{
-				InstanceID: canaryUUID,
-			}
+			// canaryUUID, _ := uuid.Parse("d5b0e6d3-523b-46cc-ad39-8a345acea4cb")
+			// var canary = &JobInstance{
+			// 	InstanceID: canaryUUID,
+			// }
 
-			enc.Encode(canary)
+			// enc.Encode(canary)
 
 			cancel()
 			//close(errChan)

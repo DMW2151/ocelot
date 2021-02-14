@@ -7,20 +7,50 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// JobPool - Collection of Jobs Registered on the producer
+// JobPool - Collection of Jobs registered on the producer
 type JobPool struct {
 	Jobs    []*Job
 	JobChan map[string]chan *JobInstance
 	wg      sync.WaitGroup
 }
 
-// StartJob - Exported wrapper around j.startSchedule() for standardization's sake
+// StartJob - Exported wrapper around j.startSchedule()
 func (jp *JobPool) StartJob(ctx context.Context, j *Job) {
-	// Start the proucer && Add to Jobs && Forward!!
-	go j.startSchedule(ctx)
+	go jp.startSchedule(j) // Start Producer - Start Ticks
+	go jp.Forward(j)       // Start Job Forwarder - Start Job.StgChananel -> jp.JobChan
 	jp.Jobs = append(jp.Jobs, j)
+}
 
-	go jp.Forward(j)
+// Forward - Forward all incoming jobInstances and release
+// the WaitGroup When j.stgCh has been closed...
+func (jp *JobPool) Forward(j *Job) {
+
+	// Close Job's staging channel and decrement the counter
+	// on function exit
+	defer func() {
+		jp.wg.Done()
+		log.WithFields(
+			log.Fields{"Job": j.ID},
+		).Warn("Staging Stopped - No Longer Forwarding Job")
+	}()
+
+	// Route to correct channel based on handlerType; cannot close this
+	// when just one job closes...
+	for ji := range j.stgCh {
+		log.Println()
+		log.WithFields(
+			log.Fields{"Job ID": j.ID, "Instance ID": ji.InstanceID},
+		).Debug("JobInstance Created")
+		jp.JobChan[j.Params["type"].(string)] <- ji
+	}
+}
+
+// gatherJobs - Calls Forward JobInstances from individual Job producers'
+// channels to the central JobPool Channel
+func (jp *JobPool) gatherJobs() {
+	for _, j := range jp.Jobs {
+		go jp.Forward(j)
+	}
 }
 
 // StopJob - Access the underlying job in JobPool by stoping the ticker
@@ -30,50 +60,5 @@ func (jp *JobPool) StartJob(ctx context.Context, j *Job) {
 func (jp *JobPool) StopJob() {
 	// WARNING: Dummy Implementation - Should Stop Jobs by ID or Path; NOT 1st Object
 	// by FIFO...
-
-	j := jp.Jobs[0]
-	// Prevent mem leak; have GR exit...
-	j.ticker.Stop()
-	j.ticker = nil
-
-	log.WithFields(
-		log.Fields{"Job": j.ID},
-	).Info("Halting Job")
-}
-
-// Forward -
-func (jp *JobPool) Forward(j *Job) {
-
-	defer jp.wg.Done()
-	// Forward all incoming jobInstances and release
-	// the WaitGroup When j.StagingChan has been closed...
-	log.WithFields(
-		log.Fields{
-			"Job":      j.ID,
-			"Interval": j.Interval,
-		},
-	).Info("New Job Registered")
-
-	for ji := range j.StagingChan {
-		// Route to correct channel...
-		jp.JobChan[ji.Job.Params["type"].(string)] <- ji
-	}
-
-}
-
-// gatherJobs - Forward  JobInstances from individual Job producers' channels to
-// to the central JobPool Channel
-func (jp *JobPool) gatherJobs() {
-
-	// For each Job registered, send these to out; the central channel...
-	for _, j := range jp.Jobs {
-		jp.wg.Add(1)
-		go jp.Forward(j)
-	}
-
-	// Defered wait; block forever while jobs > 0
-	go func() {
-		jp.wg.Wait()
-		log.Info("Channel Forwarding Released; No More Jobs on Producer...")
-	}()
+	jp.Jobs[0].quitSig <- 1
 }

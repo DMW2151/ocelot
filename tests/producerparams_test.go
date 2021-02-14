@@ -21,10 +21,10 @@ func init() {
 
 var jobs = []*Job{
 	{
-		ID:          uuid.New(),
-		Interval:    time.Millisecond * 1000,
-		Path:        "https://hello.com/en/index.html",
-		StagingChan: make(chan *JobInstance, 2),
+		ID:     uuid.New(),
+		Tdelta: time.Millisecond * 1000,
+		Path:   "https://hello.com/en/index.html",
+		stgCh:  make(chan *JobInstance, 2),
 	},
 }
 
@@ -35,7 +35,7 @@ func TestProducerParams_newListener(t *testing.T) {
 		var pConfig = &ProducerConfig{
 			JobChannelBuffer: 5,
 			ListenAddr:       "127.0.0.1:8604",
-			MaxConnections:   1,
+			MaxConn:          1,
 		}
 
 		// Create a known connection & Extract Addr Struct
@@ -54,7 +54,7 @@ func TestProducerParams_newListener(t *testing.T) {
 		var pConfig = &ProducerConfig{
 			JobChannelBuffer: 5,
 			ListenAddr:       "8.8.8.8:2151", // Nonsense Addr
-			MaxConnections:   1,
+			MaxConn:          1,
 		}
 
 		if _, err := pConfig.newListener(); !(reflect.TypeOf(err) == reflect.TypeOf(&net.OpError{})) {
@@ -73,7 +73,7 @@ func TestProducerParams_NewProducer(t *testing.T) {
 	var pConfig = &ProducerConfig{
 		JobChannelBuffer: 5,
 		ListenAddr:       "127.0.0.1:8604",
-		MaxConnections:   1,
+		MaxConn:          1,
 	}
 
 	p := pConfig.NewProducer()
@@ -92,7 +92,7 @@ func TestProducerParams_NewProducer(t *testing.T) {
 	// }
 
 	// Check Max Connections = 5 & Allocated; N Open == 0
-	if (p.NOpenConnections != 0) || (pConfig.MaxConnections != len(p.OpenConnections)) {
+	if (p.nConn != 0) || (pConfig.MaxConn != len(p.OpenConnections)) {
 		t.Error("Connections")
 	}
 

@@ -15,10 +15,10 @@ func TestJobPool_StartJob(t *testing.T) {
 
 	var (
 		staticNewJob = Job{
-			ID:          uuid.New(),
-			Interval:    time.Millisecond * 150,
-			Path:        "https://www.holland.com/global/tourism.htm",
-			StagingChan: make(chan *JobInstance, 2),
+			ID:     uuid.New(),
+			Tdelta: time.Millisecond * 150,
+			Path:   "https://www.holland.com/global/tourism.htm",
+			stgCh:  make(chan *JobInstance, 2),
 		}
 		staticJP = &JobPool{
 			Jobs: []*Job{},
@@ -50,10 +50,10 @@ func TestJobPool_StartJob(t *testing.T) {
 
 		j := staticJP.Jobs[0]
 
-		if len(j.StagingChan) == 0 {
+		if len(j.stgCh) == 0 {
 			t.Errorf(
 				"Job.newInstance() = %+v, want %+v",
-				len(j.StagingChan), 0,
+				len(j.stgCh), 0,
 			)
 		}
 
@@ -64,10 +64,10 @@ func TestJobPool_StopJob(t *testing.T) {
 
 	var (
 		staticNewJob = Job{
-			ID:          uuid.New(),
-			Interval:    time.Millisecond * 150,
-			Path:        "https://www.holland.com/global/tourism.htm",
-			StagingChan: make(chan *JobInstance, 2),
+			ID:     uuid.New(),
+			Tdelta: time.Millisecond * 150,
+			Path:   "https://www.holland.com/global/tourism.htm",
+			stgCh:  make(chan *JobInstance, 2),
 		}
 		staticJP = &JobPool{
 			Jobs: []*Job{},
@@ -114,10 +114,10 @@ func TestJobPool_gatherJobs(t *testing.T) {
 
 	var (
 		staticNewJob = Job{
-			ID:          uuid.New(),
-			Interval:    time.Millisecond * 150,
-			Path:        "https://www.holland.com/global/tourism.htm",
-			StagingChan: make(chan *JobInstance, 2),
+			ID:     uuid.New(),
+			Tdelta: time.Millisecond * 150,
+			Path:   "https://www.holland.com/global/tourism.htm",
+			stgCh:  make(chan *JobInstance, 2),
 		}
 		staticJP = &JobPool{
 			Jobs: []*Job{},

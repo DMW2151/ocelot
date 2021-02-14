@@ -4,25 +4,37 @@ package ocelot
 import (
 	"context"
 	"encoding/gob"
-
-	//"io"
+	"fmt"
 	"net"
+	"time"
 
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 )
 
-// Producer ...
+// Producer - Object that Manages the Job-Side
 type Producer struct {
-	Listener         net.Listener
-	JobPool          *JobPool
-	Config           *ProducerConfig
-	Sem              *semaphore.Weighted
-	OpenConnections  []*net.Conn
-	NOpenConnections int
+	// Listener, to accept incoming connections
+	listener net.Listener
+
+	// JobPool, used to pool tickers from multiple jobs to one
+	// see full description of struct's fields in jobpool.go
+	jobPool *JobPool
+
+	// Config, contains server level config information, see
+	// full dedscription of struct's fields in producerparams.go
+	config *ProducerConfig
+
+	// Semaphore used to manage max connections available to
+	// the object
+	sem *semaphore.Weighted
+
+	// Record and count of open connections...
+	openConnections []*net.Conn
+	nConn           int
 }
 
+// decodeOneMesage - decode a single message from a connection
 func decodeOneMesage(c net.Conn) (msg string, err error) {
 	dec := gob.NewDecoder(c)
 	err = dec.Decode(&msg)
@@ -32,44 +44,38 @@ func decodeOneMesage(c net.Conn) (msg string, err error) {
 	return msg, nil
 }
 
+// pokeEncoder - Poke Encoder to Ensure Is Valid.
+func pokeDecoder(e *gob.Decoder, v interface{}) error {
+	return e.Decode(v)
+}
+
 func (p *Producer) checkHandlerExists(msg string) bool {
-	_, ok := p.JobPool.JobChan[msg]
+	_, ok := p.jobPool.JobChan[msg]
 	return ok
 }
 
-func (p *Producer) handleJobStatusResponses(ctx context.Context, c net.Conn) {
-	// for {
-	// 	var ji = JobInstance{}
-	// 	_ = decNew.Decode(&ji)
-	// 	select {
-	// 	default:
-	// 		if ji.InstanceID != uuid.Nil {
-	// 			// Exit
-	// 		}
-	// 	case <-ctx.Done():
-	// 		return
-	// 	}
-	// }
-
-	decNew := gob.NewDecoder(c)
-
-	for {
-		var ji = JobInstance{}
-		_ = decNew.Decode(&ji)
-
-		if ji.InstanceID != uuid.Nil {
-			log.WithFields(
-				log.Fields{
-					"Instance ID": ji.InstanceID,
-					"Job ID":      ji.Job.ID,
-				},
-			).Info("Job Finished")
-		} else {
-			decNew = nil
-			return
-		}
-
+func (p *Producer) validateConnection(c net.Conn) bool {
+	if p.sem.TryAcquire(1) {
+		p.openConnections[p.nConn] = &c
+		p.nConn++
+		return true
 	}
+
+	log.WithFields(
+		log.Fields{
+			"Permitted Conns": p.config.MaxConn,
+			"Current Conns":   p.nConn,
+		},
+	).Info("Rejected Connection - Too Many Connections")
+	c.Close()
+	return false
+}
+
+func (p *Producer) terminateConnection(c net.Conn) {
+	log.Warn("Worker Connection Being Terminated...")
+	p.sem.Release(1)
+	p.nConn--
+	c.Close()
 }
 
 // handleConnection - Handles incoming connections from workers
@@ -77,117 +83,118 @@ func (p *Producer) handleJobStatusResponses(ctx context.Context, c net.Conn) {
 // jobs using `gob` and sends jobInstance over TCP conn.
 func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 
-	// Shutdown the followig resources on exit
-	defer func() {
-		log.Info("Worker Connection Being Terminated...")
-		c.Close()
-		p.Sem.Release(1)
-		p.NOpenConnections--
-	}()
+	defer p.terminateConnection(c)
 
-	// TODO: Set Connection Type With First Message
-	// Flush & Then Proceed to route Jobs Properly
+	// First, recieve message from worker indicating what its
+	// attached handler is; then route jobs based on the recieved
+	// handler name
 	handlerType, err := decodeOneMesage(c)
 	if err != nil {
 		log.Warnf("Error on Decode Handler Type %v", err)
-	}
-
-	if !p.checkHandlerExists(handlerType) {
-		log.Warnf("Handler Does Not Have Any Workers - Booting")
 		return
 	}
 
-	go p.handleJobStatusResponses(ctx, c)
+	// Do not use a connection slot on a worker servicing no jobs
+	if !p.checkHandlerExists(handlerType) {
+		log.Warnf("Handler Does Not Have Any Current Jobs - Booting")
+		return
+	}
 
-	// Create encoder for each open connection;
+	// Create an encoder to send job Instances over the wire
+	// create a minmal representation of the Instance struct
+	// to test the connection on each send...
+	//var canary JobInstance
+
+	var canary = &JobInstance{
+		InstanceID: [16]byte{},
+		CTime:      time.Time{},
+		Success:    false,
+	}
+	dec := gob.NewDecoder(c)
 	enc := gob.NewEncoder(c)
 
 	for {
-		// Work is available from the Producer's ticks
-		j := <-p.JobPool.JobChan[handlerType]
-
 		select {
+
 		case <-ctx.Done():
+			// On Cancel, exit this (and all other) open connections
 			log.WithFields(
 				log.Fields{"Producer Addr": c.LocalAddr().String()},
 			).Error("Server Terminated - Got Kill Signal")
 			return
-		default:
-			break
-		}
 
-		err := enc.Encode(&j)
-		if err != nil {
-			log.WithFields(
-				log.Fields{
-					"Job ID":      j.Job.ID,
-					"Instance ID": j.InstanceID,
-				},
-			).Warnf("Failed to Dispatch Job - Worker Timeout (??) Retrying")
+		case j := <-p.jobPool.JobChan[handlerType]:
+			// Canary Read Precedes Each Attempted Write...
+			c.SetReadDeadline(time.Now().Add(time.Millisecond * 10))
+			if err := pokeDecoder(dec, &canary); err != nil {
+				if netError, ok := err.(net.Error); ok && netError.Timeout() {
+					log.WithFields(
+						log.Fields{
+							"Instance ID": j.InstanceID,
+							"Job":         fmt.Sprintf("%+v", canary),
+						},
+					).Tracef("Canary Read Timeout: %v", err)
 
-			// Only put back in queue if this won't cause an infinite loop...
-			// I.e. There is another open connection to recieve this data...
-			if p.NOpenConnections > 1 {
-				p.JobPool.JobChan[handlerType] <- j
+				} else { // Some other error....
+					log.WithFields(
+						log.Fields{
+							"Instance ID": j.InstanceID,
+							"Job":         fmt.Sprintf("%+v", canary),
+						},
+					).Warnf("Canary Read Failed: %v", err)
+				}
 			}
-			return
-		}
 
-		log.WithFields(
-			log.Fields{
-				"Job ID":      j.Job.ID,
-				"Instance ID": j.InstanceID,
-			},
-		).Debug("Dispatched Job")
+			if canary.InstanceID.String() == "d5b0e6d3-523b-46cc-ad39-8a345acea4cb" {
+				log.Infof("Canary Did It's Job: %v", canary)
+				return
+			}
+
+			// Encode and send jobInstance - Real....
+			err = enc.Encode(&j)
+			log.WithFields(
+				log.Fields{"Instance ID": j.InstanceID},
+			).Debugf("Dispatched Job: %v", err)
+			// if err != nil {
+			// 	// If there is an error, recycle this job back into the channel
+			// 	log.WithFields(
+			// 		log.Fields{"Instance ID": j.InstanceID},
+			// 	).Warnf("Failed to Dispatch Job (Retrying): %v ", err)
+			// 	p.jobPool.JobChan[handlerType] <- j
+			// 	return
+			// }
+
+		}
 
 	}
+
 }
 
 // Serve --
 func (p *Producer) Serve(ctx context.Context) error {
 
-	var newConn = make(chan int, 1) // to manage communication
-
-	// Start Jobs on Server Start, prevents filled queues on start...
-	for _, j := range p.JobPool.Jobs {
-		go j.startSchedule(ctx)
+	// Start all jobs on server start
+	for _, j := range p.jobPool.Jobs {
+		go p.jobPool.startSchedule(j)
 	}
 
 	// Register Gather Operation for Intermediate Channels
-	p.JobPool.gatherJobs()
+	p.jobPool.gatherJobs()
 
 	for {
 		// Accept Incoming Connections; Single threaded through here...
-		c, err := p.Listener.Accept()
-
-		if c == nil {
-			continue // Handle for No Connection Exists...
-		}
-
-		if (err != nil) && (c != nil) {
-			log.WithFields(log.Fields{"Error": err}).Error("Rejected Connection")
+		c, err := p.listener.Accept()
+		// c must be True, err must be False (reject if not c || err )
+		if err != nil {
+			log.Error("Rejected Connection: %v", err)
 			c.Close()
-		}
-
-		// Otherwise, Assign connection && increment
-		if !p.Sem.TryAcquire(1) {
-			log.WithFields(
-				log.Fields{
-					"Permitted Conns": p.Config.MaxConnections,
-					"Current Conns":   p.NOpenConnections,
-				},
-			).Info("Too Many Connections")
-			c.Close()
-		} else {
-			// NOTE: Continue to use NOpenConnections for Debug;
-			// Should be same as Sempahore.size...
-			p.OpenConnections[p.NOpenConnections] = &c
-			p.NOpenConnections++
-			newConn <- 1
 		}
 
 		// Chose one of the following cases && handle
-		go p.handleConnection(ctx, c)
+		if p.validateConnection(c) {
+			go p.handleConnection(ctx, c)
+		}
+
 	}
 }
 
@@ -201,15 +208,14 @@ func (p *Producer) Serve(ctx context.Context) error {
 // TODO: See above...
 func (p *Producer) ShutDown(ctx context.Context, cancel context.CancelFunc) error {
 	cancel()
-	p.Listener.Close()
+	p.listener.Close()
 
-	// This should Only Close If not alreay closed??
-	// Close all Channels...
-	for _, v := range p.JobPool.JobChan {
+	// This should Only Close If not alreay closed
+	for _, v := range p.jobPool.JobChan {
 		close(v)
 	}
 
-	p.NOpenConnections = 0
+	p.nConn = 0
 
 	return nil
 }

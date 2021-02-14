@@ -12,7 +12,7 @@ import (
 var pConfig = &ProducerConfig{
 	JobChannelBuffer: 5,
 	ListenAddr:       "127.0.0.1:2152",
-	MaxConnections:   1,
+	MaxConn:          1,
 }
 
 // Globals for Testing; reduce boilerplate below...
@@ -63,7 +63,7 @@ func TestProducer_ShutDown(t *testing.T) {
 		p.ShutDown(ctx, cancel)
 		time.Sleep(100 * time.Millisecond)
 
-		if (len(p.OpenConnections) == p.NOpenConnections) && (p.NOpenConnections == 0) {
+		if (len(p.OpenConnections) == p.nConn) && (p.nConn == 0) {
 			t.Error(
 				"Calling Job.Serve and Connecting 1 Client Returns...", // TODO: Message
 				len(p.OpenConnections), 1,

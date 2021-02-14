@@ -2,16 +2,12 @@
 package ocelot
 
 import (
-	"fmt"
 	"math/rand"
 	"time"
 
 	ocelot "github.com/dmw2151/ocelot"
 
-	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/s3"
-	log "github.com/sirupsen/logrus"
 )
 
 // S3Handler - Handler for Managing S3 Downloads
@@ -23,28 +19,28 @@ type S3Handler struct {
 // WARNING: DO NOT KEEP THIS!!
 func (sh *S3Handler) Work(ji *ocelot.JobInstance) error {
 	return nil
-	var err error
+	//var err error
 
 	// Init Service on reach Req, Recycle Underlying Session
-	svc := s3.New(session.Must(sh.Client, err))
+	// svc := s3.New(session.Must(sh.Client, err))
 
-	// In this case; the values in ji.Job.Params take precidence
-	// over ji.Job.Path
-	output, err := svc.GetObject(
-		&s3.GetObjectInput{
-			Bucket: aws.String(ji.Job.Params["bucket"].(string)),
-			Key:    aws.String(ji.Job.Params["key"].(string)),
-		},
-	)
+	// // In this case; the values in ji.Job.Params take precidence
+	// // over ji.Job.Path
+	// output, err := svc.GetObject(
+	// 	&s3.GetObjectInput{
+	// 		Bucket: aws.String(ji.Job.Params["bucket"].(string)),
+	// 		Key:    aws.String(ji.Job.Params["key"].(string)),
+	// 	},
+	// )
 
-	if err != nil {
-		log.Warnf("Failed to Download: %e", err)
-		return err
-	}
+	// if err != nil {
+	// 	log.Warnf("Failed to Download: %e", err)
+	// 	return err
+	// }
 
-	// Other Logic Implemented here; why did this spit out...
-	log.Info(fmt.Sprint(*output.ContentLength))
-	return nil
+	// // Other Logic Implemented here; why did this spit out...
+	// log.Info(fmt.Sprint(*output.ContentLength))
+	// return nil
 }
 
 // MockHTTPHandler - For Testing HTTP Calls

@@ -4,8 +4,7 @@ max_connections: 2
 jobs:
   -
     id: 00000000-0000-0000-0000-000000000001
-    interval: 40ms
-    path: www.fake.com/path/to/fake/resource.html
+    tdelta: 1500ms
     params:
       type: S3
       bucket: ocelot-cctv

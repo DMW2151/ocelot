@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
@@ -18,10 +17,9 @@ import (
 
 // Set Context and Cancel
 var (
-	ctx, cancel = context.WithCancel(context.Background())
-)
+	Wctx, Wcancel = context.WithCancel(context.Background())
+	Pctx, Pcancel = context.WithCancel(context.Background())
 
-var (
 	s3Client, _ = session.NewSession(
 		&aws.Config{
 			Region:                        aws.String("us-east-1"),
@@ -29,9 +27,10 @@ var (
 			Credentials:                   credentials.NewEnvCredentials(),
 		},
 	)
+
 	wp = &ocelot.WorkParams{
 		HandlerType: "S3",
-		NWorkers:    20,
+		NWorkers:    2,
 		MaxBuffer:   10,
 		Handler:     &handlers.S3Handler{Client: s3Client},
 		Host:        os.Getenv("OCELOT_HOST"),
@@ -60,10 +59,18 @@ func main() {
 		time.Sleep(time.Millisecond * 100)
 		// Listen for Incoming Jobs...
 		ocelotWP, _ := wp.NewWorkerPool()
-		ocelotWP.AcceptWork(ctx, cancel) // With a Timeout of 5s
-		fmt.Println("Work's Done...")
+
+		// Call for End of Worker (set to 5s)
+		ocelotWP.AcceptWork(Wctx, Wcancel)
+
+		// Call for End of Producer 5s later
+		//time.Sleep(time.Millisecond * 5000)
+
+		// ocelotWPV2, _ := wp.NewWorkerPool()
+		// ocelotWPV2.AcceptWork(Wctx2, Wcancel2)
+		// log.Error("Worker's Done p2")
 	}()
 
-	p.Serve(ctx)
+	p.Serve(Pctx)
 
 }

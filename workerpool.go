@@ -4,6 +4,7 @@ package ocelot
 import (
 	"context"
 	"encoding/gob"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -47,7 +48,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 		errChan   = make(chan error, 10)
 		j         JobInstance
 		dec       = gob.NewDecoder(wp.Connection)
-		t         = time.NewTicker(time.Millisecond * 15000) // TESTING
+		t         = time.NewTicker(time.Millisecond * 10000) // TESTING
 		sessionID = uuid.New()
 	)
 
@@ -57,101 +58,98 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 	enc := gob.NewEncoder(wp.Connection)
 	enc.Encode(&wp.Params.HandlerType)
 
-	// There we go...
 	go func() {
+		// Constantly Write Work into the Pool, marshal into J
 		for {
-			select {
-			case <-ctx.Done():
-				return
-			case errChan <- dec.Decode(&j):
-				log.Println("Heree...") // WARNING!: WorkerPool is Still Recieving Jobs after Shutdowm...
+			err := dec.Decode(&j)
+			if err != nil { // If Error Is Not Nil; Check for Op Error
+				switch t := err.(type) {
+
+				case *net.OpError:
+					if t.Op == "read" {
+						log.Errorf("Halt on Op Error: %v", err)
+						dec = nil
+						close(errChan)
+						return
+					}
+				}
 			}
+
+			if err == io.EOF {
+				continue
+			}
+
+			log.WithFields(
+				log.Fields{
+					"Instance ID": j.InstanceID,
+					"Job":         fmt.Sprintf("%+v", j),
+				},
+			).Debugf("Worker Read Job: %v", err)
+			errChan <- err
 		}
 	}()
 
 	for {
-		// The Decoder reads data from server and unmarshals into a Job object
+		// The Decoder reads data from server and marshals into a Job object
 		// values from errChan will be nil
+
 		select {
 
 		case err := <-errChan:
 			// Either Server Encoder buffer is off and cannot be recovered,
 			// or Client has been closed and buffer is incomplete -> Cancel & Exit
 			if (err != nil) && (err != io.EOF) {
-				log.Errorf("Failed to Unmarshal Job From Server: %e", err)
+				log.Errorf("Failed to Unmarshal Job From Server: %v", err)
 				cancel()
 				return
 			}
 
-			if err == io.EOF { // Server has shutdown (or otherwise recieves no data recieved)
-				log.WithFields(
-					log.Fields{"Session ID": sessionID},
-				).Errorf("No Data Received: %v", err)
-				cancel()
-				return
-			}
-
-			// No Errors -> Send Job to WorkerPool and continue processing data...
+			// Server has shutdown (or otherwise sent no data)
+			// if err == io.EOF {
+			// 	log.WithFields(
+			// 		log.Fields{"Session ID": sessionID},
+			// 	).Errorf("Connection Closed Via Server: %v, %v", err, j)
+			// 	cancel()
+			// 	return
+			// }
+			// No Errors -> Send Job to WorkerPool
 			wp.Pending <- j
-			log.WithFields(
-				log.Fields{
-					"Session ID":  sessionID,
-					"Job ID":      j.Job.ID,
-					"Instance ID": j.InstanceID,
-					"Duration":    -1 * j.CTime.Sub(time.Now()),
-				},
-			).Debug("WorkerPool Recieved Job")
 
-		// Recieves a Cancelfunc() call; either from the case(s) above or user
+		// Recieves a Cancelfunc() call; begin Workerpool Exit
 		case <-ctx.Done():
 			log.WithFields(
-				log.Fields{
-					"Session ID":    sessionID,
-					"Worker Addr":   wp.Local,
-					"Producer Addr": wp.Remote,
-				},
+				log.Fields{"Session ID": sessionID},
 			).Warn("WorkerPool Shutdown")
-			wp.Close()
 			return
 
 		// TESTING: Workers recieve remaining jobs, depending on the buffer size,
 		// this can take a bit...
 		case <-t.C:
 			log.WithFields(
-				log.Fields{
-					"Session ID":    sessionID,
-					"Worker Addr":   wp.Local,
-					"Producer Addr": wp.Remote,
-				},
+				log.Fields{"Session ID": sessionID},
 			).Warn("WorkerPool Timeout")
+
+			canaryUUID, _ := uuid.Parse("d5b0e6d3-523b-46cc-ad39-8a345acea4cb")
+			var canary = &JobInstance{
+				InstanceID: canaryUUID,
+			}
+
+			enc.Encode(canary)
+
 			cancel()
+			//close(errChan)
+			wp.Close()
+
 		}
 
 	}
-}
-
-// Close - Wrapper around the net.Conn close function, also
-// Closes the Pool's Pending channel
-func (wp *WorkerPool) Close() {
-
-	// On close - Release Connection && Pool's Pending Channel
-	wp.Connection.Close()
-	close(wp.Pending)
-
-	log.WithFields(
-		log.Fields{
-			"Worker Addr":   wp.Local,
-			"Producer Addr": wp.Remote,
-		},
-	).Warn("Connection Closed")
 }
 
 // start - Execute the Worker
 func (wp *WorkerPool) start(ctx context.Context, wg *sync.WaitGroup, sessionuuid uuid.UUID) {
 
 	defer wg.Done()
-
-	enc := gob.NewEncoder(wp.Connection)
+	//enc := gob.NewEncoder(wp.Connection)
 
 	for ji := range wp.Pending {
 		// Do the Work; Call the Function...
@@ -165,21 +163,25 @@ func (wp *WorkerPool) start(ctx context.Context, wg *sync.WaitGroup, sessionuuid
 		}
 
 		log.WithFields(
-			log.Fields{
-				"Job ID":      ji.Job.ID,
-				"Instance ID": ji.InstanceID,
-				"Success":     ji.Success,
-			},
-		).Info("Encoding...")
+			log.Fields{"Instance ID": ji.InstanceID},
+		).Info("WorkerPool Finished Job")
 
 		// Write back to server; sends whenever job is done...
 		// Shouldn't encode multiple jobs before read...
-		select {
-		default:
-			enc.Encode(&ji)
-		case <-ctx.Done():
-			enc = nil
-		}
-
+		//enc.Encode(&ji)
 	}
+}
+
+// Close - Wrapper around the net.Conn close function, also
+// Closes the Pool's Pending channel
+// On close - Release Connection && Pool's Pending Channel
+func (wp *WorkerPool) Close() {
+	log.WithFields(
+		log.Fields{
+			"Remote": wp.Connection.RemoteAddr().String(),
+			"Local":  wp.Connection.LocalAddr().String(),
+		}).Warn("Connection Closed...")
+
+	wp.Connection.Close()
+	close(wp.Pending)
 }

@@ -13,9 +13,9 @@ import (
 // Setup Code
 var (
 	staticTestJob = &Job{
-		ID:          uuid.New(),
-		Interval:    time.Millisecond * 200,
-		StagingChan: make(chan *JobInstance, 10), // Assuming Buffer of 10 - Passed from config
+		ID:     uuid.New(),
+		Tdelta: time.Millisecond * 200,
+		stgCh:  make(chan *JobInstance, 10), // Assuming Buffer of 10 - Passed from config
 	}
 )
 
@@ -44,15 +44,15 @@ func TestJob_sendInstance(t *testing.T) {
 
 		// Minimal Required Object for Test
 		j := &Job{
-			ID:          staticTestJob.ID,
-			StagingChan: staticTestJob.StagingChan,
+			ID:    staticTestJob.ID,
+			stgCh: staticTestJob.stgCh,
 		}
 
 		// Send ONE JobInstance to the channel
 		j.sendInstance()
 
-		if len(j.StagingChan) != 1 {
-			t.Errorf("Job.sendInstance() produces %v instances, want: %v", len(j.StagingChan), 1)
+		if len(j.stgCh) != 1 {
+			t.Errorf("Job.sendInstance() produces %v instances, want: %v", len(j.stgCh), 1)
 			return
 		}
 	})
@@ -61,18 +61,18 @@ func TestJob_sendInstance(t *testing.T) {
 
 		// Minimal Required Object for Test
 		j := &Job{
-			ID:          staticTestJob.ID,
-			StagingChan: staticTestJob.StagingChan,
+			ID:    staticTestJob.ID,
+			stgCh: staticTestJob.stgCh,
 		}
 
 		// Send N JobInstances to the Staging Channel
-		for i := 0; i < cap(j.StagingChan)-1; i++ {
+		for i := 0; i < cap(j.stgCh)-1; i++ {
 			j.sendInstance()
 		}
 
 		// Ensure No Blocking &&
-		if len(j.StagingChan) != cap(j.StagingChan) {
-			t.Errorf("subsequent calls to job.sendInstance() produces %v instances, want %v", len(j.StagingChan), cap(j.StagingChan))
+		if len(j.stgCh) != cap(j.stgCh) {
+			t.Errorf("subsequent calls to job.sendInstance() produces %v instances, want %v", len(j.stgCh), cap(j.stgCh))
 			return
 		}
 	})
@@ -84,13 +84,13 @@ func TestJob_flushChannel(t *testing.T) {
 	var (
 		ctx, cancel   = context.WithCancel(context.Background())
 		staticTestJob = &Job{
-			ID:          uuid.New(),
-			Interval:    time.Millisecond * 200,
-			StagingChan: make(chan *JobInstance, 10), // Assuming Buffer of 10 - Passed from config
+			ID:     uuid.New(),
+			Tdelta: time.Millisecond * 200,
+			stgCh:  make(chan *JobInstance, 10), // Assuming Buffer of 10 - Passed from config
 		}
 	)
 
-	t.Run("Calling Job.flushChannel() clears job.StagingChan", func(t *testing.T) {
+	t.Run("Calling Job.flushChannel() clears job.stgCh", func(t *testing.T) {
 
 		// Start a timer to allow JobInstances for 250ms
 		go func() {
@@ -101,10 +101,10 @@ func TestJob_flushChannel(t *testing.T) {
 		staticTestJob.startSchedule(ctx)
 
 		// Check Job Created 2 JobInstances in Staging Channel
-		if len(staticTestJob.StagingChan) != 2 {
+		if len(staticTestJob.stgCh) != 2 {
 			t.Errorf(
 				"Calling Job.startSchedule() for 250ms Produces %v JobInstances, Want: %v",
-				len(staticTestJob.StagingChan), 2,
+				len(staticTestJob.stgCh), 2,
 			)
 		}
 
@@ -112,10 +112,10 @@ func TestJob_flushChannel(t *testing.T) {
 		staticTestJob.flushChannel()
 
 		// Check Exit
-		if len(staticTestJob.StagingChan) != 0 {
+		if len(staticTestJob.stgCh) != 0 {
 			t.Errorf(
 				"Job.flushChannel() Produces %v JobInstances, Want: %v",
-				len(staticTestJob.StagingChan), 0,
+				len(staticTestJob.stgCh), 0,
 			)
 		}
 
@@ -123,23 +123,23 @@ func TestJob_flushChannel(t *testing.T) {
 		staticTestJob.flushChannel()
 
 		// Check Exit
-		if len(staticTestJob.StagingChan) != 0 {
+		if len(staticTestJob.stgCh) != 0 {
 			t.Errorf(
 				"Secondary run of Job.flushChannel() Produces %v JobInstances, Want: %v",
-				len(staticTestJob.StagingChan), 0,
+				len(staticTestJob.stgCh), 0,
 			)
 		}
 
 		// Check behavior on closed channel; Close && Flush the Channel
 		// TODO: CLOSE:
-		// 	-  close(staticTestJob.StagingChan)
+		// 	-  close(staticTestJob.stgCh)
 		staticTestJob.flushChannel()
 
 		// Check Exit
-		if len(staticTestJob.StagingChan) != 0 {
+		if len(staticTestJob.stgCh) != 0 {
 			t.Errorf(
 				"Job.flushChannel() on Closed Channel Produces %v JobInstances, Want: %v",
-				len(staticTestJob.StagingChan), 0,
+				len(staticTestJob.stgCh), 0,
 			)
 		}
 	})
@@ -150,9 +150,9 @@ func TestJob_startSchedule(t *testing.T) {
 
 	var (
 		staticTestJob = &Job{
-			ID:          uuid.New(),
-			Interval:    time.Millisecond * 200,
-			StagingChan: make(chan *JobInstance, 10), // Assuming Buffer of 10 - Passed from config
+			ID:     uuid.New(),
+			Tdelta: time.Millisecond * 200,
+			stgCh:  make(chan *JobInstance, 10), // Assuming Buffer of 10 - Passed from config
 		}
 	)
 
@@ -174,10 +174,10 @@ func TestJob_startSchedule(t *testing.T) {
 
 		staticTestJob.startSchedule(ctx)
 
-		if len(staticTestJob.StagingChan) != 1 {
+		if len(staticTestJob.stgCh) != 1 {
 			t.Errorf(
 				"Calling Job.startSchedule & running for 5ms Produces %v JobInstance, Want %v",
-				len(staticTestJob.StagingChan), 1,
+				len(staticTestJob.stgCh), 1,
 			)
 		}
 	})
@@ -197,10 +197,10 @@ func TestJob_startSchedule(t *testing.T) {
 		}()
 
 		staticTestJob.startSchedule(ctx)
-		if len(staticTestJob.StagingChan) != 2 {
+		if len(staticTestJob.stgCh) != 2 {
 			t.Errorf(
 				"Calling Job.startSchedule & running for 250ms Produces %v JobInstance, Want %v",
-				len(staticTestJob.StagingChan), 2,
+				len(staticTestJob.stgCh), 2,
 			)
 		}
 	})
@@ -221,22 +221,22 @@ func TestJob_startSchedule(t *testing.T) {
 
 		staticTestJob.startSchedule(ctx)
 
-		if len(staticTestJob.StagingChan) != cap(staticTestJob.StagingChan) {
+		if len(staticTestJob.stgCh) != cap(staticTestJob.stgCh) {
 			t.Errorf(
 				"Calling Job.startSchedule & running for 2500ms Produces %v JobInstance, Want %v",
-				len(staticTestJob.StagingChan), cap(staticTestJob.StagingChan),
+				len(staticTestJob.stgCh), cap(staticTestJob.stgCh),
 			)
 		}
 	})
 
-	t.Run("Calling Job.startSchedule for 250ms (and 500ms Interval) Produces 1 JobInstance", func(t *testing.T) {
+	t.Run("Calling Job.startSchedule for 250ms (and 500ms Tdelta) Produces 1 JobInstance", func(t *testing.T) {
 		// Shared Context...
 		var (
 			ctx, cancel = context.WithCancel(context.Background())
 			j           = &Job{
-				ID:          staticTestJob.ID,
-				Interval:    time.Millisecond * 500,
-				StagingChan: staticTestJob.StagingChan,
+				ID:     staticTestJob.ID,
+				Tdelta: time.Millisecond * 500,
+				stgCh:  staticTestJob.stgCh,
 			}
 		)
 
@@ -249,10 +249,10 @@ func TestJob_startSchedule(t *testing.T) {
 		}()
 
 		j.startSchedule(ctx)
-		if len(j.StagingChan) != 1 {
+		if len(j.stgCh) != 1 {
 			t.Errorf(
-				"Calling Job.startSchedule & running for 250ms (w. 500ms Interval) Produces %v JobInstance, Want %v",
-				len(j.StagingChan), 1,
+				"Calling Job.startSchedule & running for 250ms (w. 500ms Tdelta) Produces %v JobInstance, Want %v",
+				len(j.stgCh), 1,
 			)
 		}
 	})

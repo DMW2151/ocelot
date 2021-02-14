@@ -19,7 +19,7 @@ func OpenYaml(f string) *ocelot.ProducerConfig {
 
 	// Generate UUID if DNE...
 	for _, j := range pCfg.Jobs {
-		j.FromConfig()
+		j.FromConfig(pCfg.JobChannelBuffer)
 	}
 
 	return &pCfg

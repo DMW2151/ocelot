@@ -16,6 +16,7 @@ type JobPool struct {
 
 // StartJob - Exported wrapper around j.startSchedule()
 func (jp *JobPool) StartJob(ctx context.Context, j *Job) {
+	jp.wg.Add(1)
 	go jp.startSchedule(j) // Start Producer - Start Ticks
 	go jp.Forward(j)       // Start Job Forwarder - Start Job.StgChananel -> jp.JobChan
 	jp.Jobs = append(jp.Jobs, j)
@@ -30,7 +31,7 @@ func (jp *JobPool) Forward(j *Job) {
 	defer func() {
 		jp.wg.Done()
 		log.WithFields(
-			log.Fields{"Job": j.ID},
+			log.Fields{"Job ID": j.ID},
 		).Warn("Staging Stopped - No Longer Forwarding Job")
 	}()
 
@@ -47,6 +48,8 @@ func (jp *JobPool) Forward(j *Job) {
 // gatherJobs - Calls Forward JobInstances from individual Job producers'
 // channels to the central JobPool Channel
 func (jp *JobPool) gatherJobs() {
+
+	jp.wg.Add(len(jp.Jobs))
 	for _, j := range jp.Jobs {
 		go jp.Forward(j)
 	}

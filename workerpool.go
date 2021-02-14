@@ -102,7 +102,7 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 			if err == io.EOF {
 				log.WithFields(
 					log.Fields{"Session ID": sessionID},
-				).Errorf("Connection Closed Via Server: %v, %v", err, j)
+				).Errorf("Connection Closed Via Server: %v", err)
 				cancel()
 				return
 			}

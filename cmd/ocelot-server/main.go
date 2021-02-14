@@ -71,6 +71,11 @@ func main() {
 		// log.Error("Worker's Done p2")
 	}()
 
-	p.Serve(Pctx)
+	go func() {
+		time.Sleep(time.Millisecond * 5000)
+		p.ShutDown(Pctx, Pcancel)
+	}()
+
+	p.Serve(Pctx, Pcancel)
 
 }

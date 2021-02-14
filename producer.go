@@ -33,6 +33,9 @@ type Producer struct {
 	nConn           int
 }
 
+// TODO: Attach to Producer
+var servKill = make(chan int, 1)
+
 // decodeOneMesage - decode a single message from a connection
 // Opens new decoder on a connection and returns one and only
 // one message
@@ -126,95 +129,100 @@ func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
 
 		// On recieve tick
 		case j := <-p.jobPool.JobChan[handlerType]:
-
-			// Test read the value on the connection into canary,
-			// Expect this to return no value
-			c.SetReadDeadline(time.Now().Add(time.Millisecond * 10))
+			// Test read the value on the connection into canary, Set short
+			// (BUT POSITIVE, NOT 0ms) read Timeout to force either i/o
+			// timeout (do nothing) or closed pipe (shutdown an retry)
+			c.SetReadDeadline(time.Now().Add(time.Millisecond * 5))
 			if err := dec.Decode(&canary); err != nil {
 				if netError, ok := err.(net.Error); ok && netError.Timeout() {
+					// Do Nothing...
+				} else { // TODO: Check if this can block
 					log.WithFields(
-						log.Fields{
-							"Instance ID": j.InstanceID,
-						},
-					).Tracef("Canary Read Timeout: %v", err)
-				} else { // Some other error....
-					log.WithFields(
-						log.Fields{
-							"Instance ID": j.InstanceID,
-						},
-					).Warnf("Canary Read Failed (Retry): %v", err)
+						log.Fields{"Instance ID": j.InstanceID},
+					).Warnf("Failed to Dispatch Job on Read (Retry): %v", err)
 					p.jobPool.JobChan[handlerType] <- j
 					return
 				}
 			}
 
-			// Encode and send jobInstance - Real....
+			// Encode and send the jobInstance for worker to process
 			err = enc.Encode(&j)
 			log.WithFields(
 				log.Fields{"Instance ID": j.InstanceID},
 			).Info("Dispatched Job")
 
-			if err != nil {
+			if err != nil { // TODO: Check if this can block
 				// If there is an error, recycle this job back into the channel
 				log.WithFields(
 					log.Fields{"Instance ID": j.InstanceID},
-				).Warnf("Failed to Dispatch Job (Retrying): %v ", err)
+				).Warnf("Failed to Dispatch Job (Retry): %v ", err)
 				p.jobPool.JobChan[handlerType] <- j
 				return
 			}
-
 		}
-
 	}
-
 }
 
-// Serve --
-func (p *Producer) Serve(ctx context.Context) error {
+// Serve - Serve the producer, validate and accept all
+// incoming worker connections
+func (p *Producer) Serve(ctx context.Context, cancel context.CancelFunc) error {
 
-	// Start all jobs on server start
+	log.Info("Started Server")
+
+	// Start all schedules on server start
 	for _, j := range p.jobPool.Jobs {
 		go p.jobPool.startSchedule(j)
 	}
 
-	// Register Gather Operation for Intermediate Channels
+	// Call gather to forward each individual job's schedule to
+	// intermediate channels for each handler type
 	p.jobPool.gatherJobs()
 
 	for {
 		// Accept Incoming Connections; Single threaded through here...
 		c, err := p.listener.Accept()
-		// c must be True, err must be False (reject if not c || err )
 		if err != nil {
-			log.Error("Rejected Connection: %v", err)
-			c.Close()
+			select {
+			case <-servKill:
+				return nil
+			default:
+				// TODO: Implement Shutdown Logic Here...
+				cancel()
+			}
 		}
 
-		// Chose one of the following cases && handle
+		// Allow if open connection slot(s), otherwise boot
 		if p.validateConnection(c) {
 			go p.handleConnection(ctx, c)
 		}
-
 	}
 }
 
-// ShutDown - Very roughly emulates the behavior of the net/http close procedure;
-// quoted below:
-// 		Shutdown works by first closing all open listeners, then closing all idle connections,
-// 		and then waiting indefinitely for connections to return to idle and then shut down.
-// 		If the provided context expires before the shutdown is complete, Shutdown returns
-// 		the context’s error, otherwise it returns any error returned from closing the Server’s
-// 		underlying Listener(s).
-// TODO: See above...
+// ShutDown - TODO: Roughly (more forcefully) emulate the behavior of the net/http
+// close procedure, quoted below:
+// 	- Close all open listeners
+//	- Close all idle connections,
+// 	- Wait indefinitely for connections to return to idle and then shut down.
 func (p *Producer) ShutDown(ctx context.Context, cancel context.CancelFunc) error {
+
+	// Call to cancel handles closing idle connections.
+	// cancel() -> call to ctx.Done() for all connections which forces handleConnections
+	// to exit, closing the connection & halting any more outgoing jobs
 	cancel()
+
+	// Send Break...
+	close(servKill)
+
+	// Close all open listeners
 	p.listener.Close()
 
-	// This should Only Close If not alreay closed
-	for _, v := range p.jobPool.JobChan {
-		close(v)
+	// Stop all producers -
+	// NOTE: current implementation of StopJob just pops the first job from the
+	// List, so just call w. no args N times, where N is total num of jobs registered
+	for range p.jobPool.Jobs {
+		// Send QuitSig
+		p.jobPool.StopJob()
 	}
-
-	p.nConn = 0
-
+	time.Sleep(time.Millisecond * 1000)
 	return nil
 }

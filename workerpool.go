@@ -17,10 +17,12 @@ import (
 // set channel buffering, concurrency, etc. of WorkerPool
 type WorkerPool struct {
 	Connection net.Conn
-	Local      string
-	Remote     string
 	Params     *WorkParams
 	Pending    chan JobInstance
+
+	// Most likely User defined function of type
+	// JobHandler that workers in this pool execute
+	Handler JobHandler
 }
 
 // StartWorkers - Start Workers, runs `wp.Params.NWorkers`
@@ -131,14 +133,14 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 }
 
 // start - Execute the Worker
+// Write back to server; sends whenever job is done...
+// Shouldn't encode multiple jobs before read..
 func (wp *WorkerPool) start(ctx context.Context, wg *sync.WaitGroup, sessionuuid uuid.UUID) {
-
 	defer wg.Done()
-	//enc := gob.NewEncoder(wp.Connection)
 
 	for ji := range wp.Pending {
 		// Do the Work; Call the Function...
-		err := wp.Params.Handler.Work(&ji)
+		err := wp.Handler.Work(&ji)
 
 		// Report Results to logs
 		if err != nil {
@@ -151,9 +153,6 @@ func (wp *WorkerPool) start(ctx context.Context, wg *sync.WaitGroup, sessionuuid
 			log.Fields{"Instance ID": ji.InstanceID},
 		).Info("WorkerPool Finished Job")
 
-		// Write back to server; sends whenever job is done...
-		// Shouldn't encode multiple jobs before read...
-		//enc.Encode(&ji)
 	}
 }
 

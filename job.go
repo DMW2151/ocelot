@@ -2,6 +2,8 @@
 package ocelot
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,39 +19,58 @@ type Job struct {
 	// Producer channel - Attach Ticker && Create New Ticker to Modify
 	stgCh chan *JobInstance
 
-	// QuitSig - Used to stop the job's ticker externally
-	quitSig chan int
-
-	// Pass any and all params here needed for the worker.
-	// WARNING: MUST BE GOB Encodeable!
-	Params map[string]interface{} `yaml:"params"`
-
-	// Tdelta between creation of new job instances
-	Tdelta time.Duration `yaml:"tdelta"`
+	// quitCh - Used to stop the job's ticker externally
+	quitCh chan bool
 
 	// Unexported ticker; used to schedule job freq.
 	ticker *time.Ticker
+
+	// Pass any and all params here needed for the worker.
+	// WARNING: MUST BE GOB Encodeable!
+	params map[string]interface{}
 }
 
-// JobInstance - Instance of a Job with the original template
-// attached as metadata
+// JobInstance - Instance of a Job
 type JobInstance struct {
 	InstanceID uuid.UUID // Randomly generated UUID for each instance,
 	CTime      time.Time // Instance Create Time
 	Success    bool
 }
 
-// FromConfig - Generate a new Job from config
-func (j *Job) FromConfig(jcb int) {
-	// Set UUID for Instance
-	if j.ID == uuid.Nil {
-		j.ID = uuid.New()
+// JobConfig - Read from Yaml...
+type JobConfig struct {
+	ID          uuid.UUID              `yaml:"id"`
+	Sendtimeout time.Duration          `yaml:"send_timeout"`
+	Tdelta      time.Duration          `yaml:"tdelta"`
+	StgBuffer   int                    `yaml:"stg_buffer"`
+	Params      map[string]interface{} `yaml:"params"`
+}
+
+// updateConfig - Augment a new Job from config, adds UUID, Stg channel,
+// and Ticker...
+func yieldJob(jc *JobConfig) *Job {
+
+	// Generate Static Hash for Each Job If UUID is Not Generated
+	if jc.ID == uuid.Nil {
+		jc.ID = generateStaticUUID(
+			[]byte(fmt.Sprintf("%v", jc.Params)),
+		)
 	}
 
-	// Set Other params; ticker and Tdelta
-	j.stgCh = make(chan *JobInstance, jcb)
-	j.ticker = time.NewTicker(j.Tdelta)
-	j.quitSig = make(chan int, 1)
+	// If buffer is negative; set to 0, prevent panic...
+	if b := (jc.StgBuffer < 0); b {
+		log.Warn("Require Job Stage Buffer Non Neg (got %d), setting to 0", jc.StgBuffer)
+		jc.StgBuffer = 0
+	}
+
+	return &Job{
+		ID:     jc.ID,
+		stgCh:  make(chan *JobInstance, 0),
+		quitCh: make(chan bool, 1),
+		ticker: time.NewTicker(jc.Tdelta),
+		params: jc.Params,
+	}
+
 }
 
 // newJobInstance - Creates new JobInstance using parent Job as a template
@@ -63,13 +84,13 @@ func (j *Job) newJobInstance(t time.Time) *JobInstance {
 // sendInstance - creates new JobInstance and sends to job's staging channel
 func (j *Job) sendInstance(t time.Time) {
 
-	// Set timeout, if the stgCh is not available for
-	// send within 100ms (TODO: can be configurable) then drop
-	// this JobInstance
+	// Instatiates new JobInstance w. ctime if the stgCh is not available for
+	// send within timeout interval (default: 100ms) then drop this JobInstance
 	select {
-	// Instatiates new JobInstance w. current time
+
 	case j.stgCh <- j.newJobInstance(t):
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(time.Millisecond * 100):
+		// TODO: All
 		log.WithFields(
 			log.Fields{"Job ID": j.ID},
 		).Debug("JobInstance Timeout")
@@ -93,7 +114,6 @@ func (jp *JobPool) startSchedule(j *Job) {
 
 	// Send first Job on schedule start
 	j.sendInstance(time.Now())
-	j.ticker = time.NewTicker(j.Tdelta)
 
 	for {
 		select {
@@ -104,11 +124,18 @@ func (jp *JobPool) startSchedule(j *Job) {
 
 		// Do not use a common context here because each job must be
 		// individually cancelable
-		case <-j.quitSig:
+		case <-j.quitCh:
 			log.WithFields(
 				log.Fields{"Job ID": j.ID},
 			).Warn("JobPool Got Quit Sig")
 			return
 		}
 	}
+}
+
+// Using a static Ccelot hash, generate an ID from content
+func generateStaticUUID(b []byte) (uid uuid.UUID) {
+	encUUID, _ := uuid.Parse("bcf3070f-7898-4399-bcae-4fcce2b451f5")
+	uid = uuid.NewHash(sha256.New(), encUUID, b, 3)
+	return uid
 }

@@ -1,6 +1,10 @@
 // Package ocelot ...
 package ocelot
 
+// List of Tests For Job
+
+// fromConfig()
+
 import (
 	"context"
 	"reflect"
@@ -18,6 +22,11 @@ var (
 		stgCh:  make(chan *JobInstance, 10), // Assuming Buffer of 10 - Passed from config
 	}
 )
+
+func TestJob_updateConfig(t *testing.T) {
+	// Given a partially filled job, is it filled?
+	t.Run()
+}
 
 func TestJob_newInstance(t *testing.T) {
 	t.Run("Calling Job.newInstance Produces JobInstance", func(t *testing.T) {

@@ -9,9 +9,9 @@ import (
 
 // JobPool - Collection of Jobs registered on the producer
 type JobPool struct {
-	Jobs    []*Job
-	JobChan map[string]chan *JobInstance
-	wg      sync.WaitGroup
+	jobs   []*Job
+	workCh map[string]chan *JobInstance // workCh is a misleading name...
+	wg     sync.WaitGroup
 }
 
 // StartJob - Exported wrapper around j.startSchedule()
@@ -19,7 +19,7 @@ func (jp *JobPool) StartJob(ctx context.Context, j *Job) {
 	jp.wg.Add(1)
 	go jp.startSchedule(j) // Start Producer - Start Ticks
 	go jp.Forward(j)       // Start Job Forwarder - Start Job.StgChananel -> jp.JobChan
-	jp.Jobs = append(jp.Jobs, j)
+	jp.jobs = append(jp.jobs, j)
 }
 
 // Forward - Forward all incoming jobInstances and release
@@ -40,8 +40,8 @@ func (jp *JobPool) Forward(j *Job) {
 	for ji := range j.stgCh {
 		log.WithFields(
 			log.Fields{"Job ID": j.ID, "Instance ID": ji.InstanceID},
-		).Trace("JobInstance Created")
-		jp.JobChan[j.Params["type"].(string)] <- ji
+		).Info("JobInstance Created")
+		jp.workCh[j.params["type"].(string)] <- ji
 	}
 }
 
@@ -49,8 +49,8 @@ func (jp *JobPool) Forward(j *Job) {
 // channels to the central JobPool Channel
 func (jp *JobPool) gatherJobs() {
 
-	jp.wg.Add(len(jp.Jobs))
-	for _, j := range jp.Jobs {
+	jp.wg.Add(len(jp.jobs))
+	for _, j := range jp.jobs {
 		go jp.Forward(j)
 	}
 }
@@ -62,5 +62,5 @@ func (jp *JobPool) gatherJobs() {
 func (jp *JobPool) StopJob() {
 	// WARNING: Dummy Implementation - Should Stop Jobs by ID or Path; NOT 1st Object
 	// by FIFO...
-	jp.Jobs[0].quitSig <- 1
+	jp.jobs[0].quitCh <- true
 }

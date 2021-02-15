@@ -2,12 +2,10 @@ package ocelot
 
 import (
 	"io/ioutil"
-	"net"
 	"os"
-	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/sync/semaphore"
 	"gopkg.in/yaml.v2"
 )
 
@@ -25,82 +23,41 @@ type ProducerConfig struct {
 	// Max Active Connections to producer
 	MaxConn int `yaml:"max_connections"`
 
-	// List of Jobs to Init
-	Jobs []*Job `yaml:"jobs"`
+	// Default Timeout for Sends to Staging Channnel
+	JobTimeout time.Duration `yaml:"job_timeout"`
+
+	// List of Jobs to Init on Server Start
+	JobCfgs []*JobConfig `yaml:"jobs"`
+
+	// Buffer for the pool of multiple jobs sharing one handler...
+	HandlerBuffer int `yaml:"handler_buffer"`
 }
 
 // Opens default server config at $OCELOT_CFG and creates a new producer config
 // object, opens a new server w.
-func openOcelotConfig() (pCfg ProducerConfig) {
+// YUCK: pass *T as interface, unmarshal into v and then convert back to concrete type???
+// 		cfg := parseConfig(
+// 			os.Getenv("OCELOT_WORKER_CFG"),
+// 			&WorkParams{},
+// 		).(*WorkParams)
+func parseConfig(fp string, v interface{}) interface{} {
 
-	// Open config...
-	cfgContent, err := ioutil.ReadFile(os.Getenv("OCELOT_CFG"))
+	// Open config file...
+	cfgContent, err := ioutil.ReadFile(fp)
 
 	if err != nil {
 		log.WithFields(
-			log.Fields{"Config": os.Getenv("OCELOT_CFG")},
-		).Fatalf("Failed to Read: %+v", err)
+			log.Fields{"Config": fp},
+		).Fatalf("Failed to Read Config: %+v", err)
 	}
 
 	// Expand environment variables && read into config
 	cfgContent = []byte(os.ExpandEnv(string(cfgContent)))
-	if err := yaml.Unmarshal(cfgContent, &pCfg); err != nil {
+	if err := yaml.Unmarshal(cfgContent, v); err != nil {
 		log.WithFields(
-			log.Fields{"Config": os.Getenv("OCELOT_CFG")},
-		).Fatalf("Failed to Read: %+v", err)
+			log.Fields{"Config": fp},
+		).Fatalf("Failed to Read Config Contents: %+v", err)
 	}
 
-	// Generate UUID Job if DNE:
-	// WARNING: If Not Set In Config, Job UUIDs will vary between sessions
-	for _, j := range pCfg.Jobs {
-		j.FromConfig(pCfg.JobChannelBuffer)
-	}
-
-	return pCfg
-}
-
-// newListener from config...
-func newListener(cfg *ProducerConfig) net.Listener {
-
-	var l, err = net.Listen("tcp", cfg.ListenAddr)
-
-	// Not Testable...Can't Ensure that Exits with Fail...
-	if err != nil {
-		log.WithFields(
-			log.Fields{"Producer Addr": cfg.ListenAddr},
-		).Fatal("Failed to Start Producer", err)
-	}
-	return l
-}
-
-// NewProducer - Create New Server, Initializes listener and
-// Job Channels
-func NewProducer(fp string) *Producer {
-
-	cfg := openOcelotConfig()
-
-	// Create Producer, filling in values required from config
-	p := Producer{
-		listener: newListener(&cfg),
-		jobPool: &JobPool{
-			Jobs:    cfg.Jobs,
-			JobChan: make(map[string]chan (*JobInstance), cfg.JobChannelBuffer),
-			wg:      sync.WaitGroup{},
-		},
-		openConnections: make([]*net.Conn, cfg.MaxConn),
-		config:          &cfg,
-		sem:             semaphore.NewWeighted(int64(cfg.MaxConn)),
-	}
-
-	// Init Channels for each Unique Handler...
-	for _, j := range p.jobPool.Jobs {
-		handlerType := j.Params["type"].(string)
-
-		if _, ok := p.jobPool.JobChan[handlerType]; !ok {
-			p.jobPool.JobChan[handlerType] = make(chan *JobInstance, cfg.JobChannelBuffer)
-		}
-
-	}
-
-	return &p
+	return v
 }

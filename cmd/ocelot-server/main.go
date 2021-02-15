@@ -2,22 +2,20 @@ package main
 
 import (
 	"context"
-	"os"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/dmw2151/ocelot"
-	handlers "github.com/dmw2151/ocelot/internal/handlers"
+	ocelot "github.com/dmw2151/ocelot"
 	"github.com/pkg/profile"
 	log "github.com/sirupsen/logrus"
 )
 
 // Set Context and Cancel
 var (
-	Wctx, Wcancel = context.WithCancel(context.Background())
-	Pctx, Pcancel = context.WithCancel(context.Background())
+	wctx, wcancel = context.WithCancel(context.Background())
+	pctx, pcancel = context.WithCancel(context.Background())
 
 	s3Client, _ = session.NewSession(
 		&aws.Config{
@@ -26,16 +24,7 @@ var (
 			Credentials:                   credentials.NewEnvCredentials(),
 		},
 	)
-
-	wp = &ocelot.WorkParams{
-		HandlerType: "S3",
-		NWorkers:    2,
-		MaxBuffer:   10,
-		Handler:     &handlers.S3Handler{Client: s3Client},
-		Host:        os.Getenv("OCELOT_HOST"),
-		Port:        os.Getenv("OCELOT_PORT"),
-		DialTimeout: time.Duration(time.Millisecond * 1000),
-	}
+	h = ocelot.S3Handler{Client: s3Client}
 )
 
 func init() {
@@ -50,30 +39,24 @@ func main() {
 
 	defer profile.Start().Stop()
 
-	// Start Empty Producer && Serve
-	p := ocelot.NewProducer("./cmd/cfg/ocelot_server_cfg.yml")
-
 	go func() {
-		time.Sleep(time.Millisecond * 100)
-		// Listen for Incoming Jobs...
-		ocelotWP, _ := wp.NewWorkerPool()
+		// Listen for Incoming Jobs after Server is Up
+		time.Sleep(time.Millisecond * 10)
 
-		// Call for End of Worker (set to 5s)
-		ocelotWP.AcceptWork(Wctx, Wcancel)
-
-		// Call for End of Producer 5s later
-		//time.Sleep(time.Millisecond * 5000)
-
-		// ocelotWPV2, _ := wp.NewWorkerPool()
-		// ocelotWPV2.AcceptWork(Wctx2, Wcancel2)
-		// log.Error("Worker's Done p2")
+		// Start Default Worker (uses: OCELOT_WORKER_CFG)
+		wp, _ := ocelot.NewWorkerPool(h)
+		wp.AcceptWork(wctx, wcancel)
 	}()
 
+	p, _ := ocelot.NewProducer()
+
 	go func() {
+		// Wait 5s Until Shutdown...
 		time.Sleep(time.Millisecond * 5000)
-		p.ShutDown(Pctx, Pcancel)
+		p.ShutDown(pctx, pcancel)
 	}()
 
-	p.Serve(Pctx, Pcancel)
+	// Start Default Producer && Serve (uses: OCELOT_SERVER_CFG)
+	p.Serve(pctx, pcancel)
 
 }

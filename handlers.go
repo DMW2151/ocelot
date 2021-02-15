@@ -5,19 +5,26 @@ import (
 	"math/rand"
 	"time"
 
-	ocelot "github.com/dmw2151/ocelot"
-
 	"github.com/aws/aws-sdk-go/aws/session"
 )
+
+// JobHandler - Interface for Object that processes
+// a jobInstance
+type JobHandler interface {
+	Work(j *JobInstance) error
+}
 
 // S3Handler - Handler for Managing S3 Downloads
 type S3Handler struct {
 	Client *session.Session
 }
 
+// MockHTTPHandler - For Testing HTTP Calls
+type MockHTTPHandler struct{}
+
 // Work - Required to Implement Handler Interface
 // WARNING: DO NOT KEEP THIS!!
-func (sh *S3Handler) Work(ji *ocelot.JobInstance) error {
+func (sh S3Handler) Work(ji *JobInstance) error {
 	return nil
 	//var err error
 
@@ -43,12 +50,9 @@ func (sh *S3Handler) Work(ji *ocelot.JobInstance) error {
 	// return nil
 }
 
-// MockHTTPHandler - For Testing HTTP Calls
-type MockHTTPHandler struct{}
-
 // Work - Required to Implement Handler Interface
 // Not an HTTP Call; Just Waits 50-300ms for timing...
-func (m *MockHTTPHandler) Work(ji *ocelot.JobInstance) error {
+func (m *MockHTTPHandler) Work(ji *JobInstance) error {
 	time.Sleep(
 		time.Duration(rand.Intn(250)+50.0) * time.Millisecond,
 	)

@@ -40,7 +40,7 @@ func (jp *JobPool) Forward(j *Job) {
 	for ji := range j.stgCh {
 		log.WithFields(
 			log.Fields{"Job ID": j.ID, "Instance ID": ji.InstanceID},
-		).Trace("JobInstance Created")
+		).Info("JobInstance Created")
 		jp.workCh[j.params["type"].(string)] <- ji
 	}
 }

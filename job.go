@@ -90,7 +90,6 @@ func (j *Job) sendInstance(t time.Time) {
 
 	case j.stgCh <- j.newJobInstance(t):
 	case <-time.After(time.Millisecond * 100):
-		// TODO: All
 		log.WithFields(
 			log.Fields{"Job ID": j.ID},
 		).Debug("JobInstance Timeout")

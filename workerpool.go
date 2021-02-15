@@ -36,7 +36,10 @@ func (wp *WorkerPool) StartWorkers(ctx context.Context, sessionuuid uuid.UUID) {
 	}
 
 	log.WithFields(
-		log.Fields{"Session ID": sessionuuid},
+		log.Fields{
+			"Session ID": sessionuuid,
+			"Local Addr": wp.Connection.LocalAddr().String(),
+		},
 	).Debugf("Started %d Workers", wp.Params.NWorkers)
 
 	go func() { wg.Wait() }()
@@ -60,19 +63,17 @@ func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc)
 	enc.Encode(&wp.Params.HandlerType)
 
 	go func() {
-		// Constantly Write Work into the Pool, marshal into J
+		// Constantly Read from the Connection and write work into the pool
 		for {
 			err := dec.Decode(&j)
 			if err != nil { // If Error Is Not Nil; Check for Op Error
 				switch t := err.(type) {
 
 				case *net.OpError:
-					if t.Op == "read" {
-						log.Errorf("Halt Worker on Op Error: %v", err)
-						dec = nil
-						close(errChan)
-						return
-					}
+					log.Errorf("Halt Worker on Op Error: %v", err)
+					dec = nil
+					close(errChan)
+					return
 				}
 			}
 

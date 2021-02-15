@@ -14,8 +14,8 @@ import (
 
 // Set Context and Cancel
 var (
-	Wctx, Wcancel = context.WithCancel(context.Background())
-	Pctx, Pcancel = context.WithCancel(context.Background())
+	wctx, wcancel = context.WithCancel(context.Background())
+	pctx, pcancel = context.WithCancel(context.Background())
 
 	s3Client, _ = session.NewSession(
 		&aws.Config{
@@ -24,6 +24,7 @@ var (
 			Credentials:                   credentials.NewEnvCredentials(),
 		},
 	)
+	h = ocelot.S3Handler{Client: s3Client}
 )
 
 func init() {
@@ -41,11 +42,10 @@ func main() {
 	go func() {
 		// Listen for Incoming Jobs after Server is Up
 		time.Sleep(time.Millisecond * 10)
-		// Start Default Worker (uses: OCELOT_WORKER_CFG)
-		var h ocelot.S3Handler = ocelot.S3Handler{Client: s3Client}
-		wp, _ := ocelot.NewWorkerPool(h)
 
-		wp.AcceptWork(Wctx, Wcancel)
+		// Start Default Worker (uses: OCELOT_WORKER_CFG)
+		wp, _ := ocelot.NewWorkerPool(h)
+		wp.AcceptWork(wctx, wcancel)
 	}()
 
 	p, _ := ocelot.NewProducer()
@@ -53,10 +53,10 @@ func main() {
 	go func() {
 		// Wait 5s Until Shutdown...
 		time.Sleep(time.Millisecond * 5000)
-		p.ShutDown(Pctx, Pcancel)
+		p.ShutDown(pctx, pcancel)
 	}()
 
 	// Start Default Producer && Serve (uses: OCELOT_SERVER_CFG)
-	p.Serve(Pctx, Pcancel)
+	p.Serve(pctx, pcancel)
 
 }

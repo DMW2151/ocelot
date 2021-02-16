@@ -1,0 +1,24 @@
+syntax="proto3";
+
+package ocelot;
+
+//option go_package = "/ocelot";
+
+message JobInstanceMsg {
+      string JobID = 1;
+      string InstanceID = 2;
+      int64 Ctime = 3; 
+      int64 Mtime = 4;
+      bool Success = 5;
+      // WARNING: Any type resolves map[string]interface{} - plenty of warnings
+      // online about how this might be subject to change
+      map<string, string> Params = 6; 
+}
+
+
+
+service OcelotWorker {
+      rpc Execute(JobInstanceMsg) returns (JobInstanceMsg) {}
+      rpc ExecuteStream(stream JobInstanceMsg) returns (stream JobInstanceMsg) {}
+}
+

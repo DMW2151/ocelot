@@ -1,30 +1,34 @@
 package main
 
 import (
-	"context"
-	"time"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
+
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	ocelot "github.com/dmw2151/ocelot"
-	"github.com/pkg/profile"
 	log "github.com/sirupsen/logrus"
+
+	"golang.org/x/net/context"
 )
 
-// Set Context and Cancel
 var (
+	err           error
 	wctx, wcancel = context.WithCancel(context.Background())
-	pctx, pcancel = context.WithCancel(context.Background())
 
-	s3Client, _ = session.NewSession(
+	// Define S3 Sessions
+	s3Session, _ = session.NewSession(
 		&aws.Config{
 			Region:                        aws.String("us-east-1"),
 			CredentialsChainVerboseErrors: aws.Bool(true),
 			Credentials:                   credentials.NewEnvCredentials(),
 		},
 	)
-	h = ocelot.S3Handler{Client: s3Client}
+	// Define S3 Handler
+	h = ocelot.S3Handler{
+		Session: s3Session,
+		Client:  s3.New(session.Must(s3Session, err)),
+	}
 )
 
 func init() {
@@ -36,27 +40,6 @@ func init() {
 }
 
 func main() {
-
-	defer profile.Start().Stop()
-
-	go func() {
-		// Listen for Incoming Jobs after Server is Up
-		time.Sleep(time.Millisecond * 10)
-
-		// Start Default Worker (uses: OCELOT_WORKER_CFG)
-		wp, _ := ocelot.NewWorkerPool(h)
-		wp.AcceptWork(wctx, wcancel)
-	}()
-
-	p, _ := ocelot.NewProducer()
-
-	go func() {
-		// Wait 5s Until Shutdown...
-		time.Sleep(time.Millisecond * 5000)
-		p.ShutDown(pctx, pcancel)
-	}()
-
-	// Start Default Producer && Serve (uses: OCELOT_SERVER_CFG)
-	p.Serve(pctx, pcancel)
-
+	wp, _ := ocelot.NewWorkerPool(h)
+	wp.Serve(wctx, wcancel)
 }

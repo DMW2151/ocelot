@@ -13,26 +13,26 @@ import (
 // WorkParams is a factory struct for WorkerPools
 type WorkParams struct {
 	// Name of Handler...
-	HandlerType string `yaml:"handler_type"`
+	HandlerType string `json:"handler_type"`
 
 	// Number of goroutines to launch taking work
-	NWorkers int `yaml:"n_workers"`
+	NWorkers int `json:"n_workers"`
 
 	// Job Channel, buffer to in Chan between decoding work
 	// and the worker
-	MaxBuffer int `yaml:"max_buffer"`
+	MaxBuffer int `json:"max_buffer"`
 
 	// IP and Host of Producer
-	Host string `yaml:"host"`
-	Port string `yaml:"port"`
+	Host string `json:"host"`
+	Port string `json:"port"`
 
 	// How long to wait on Producer to respond
-	DialTimeout time.Duration `yaml:"dial_timeout"`
+	DialTimeout time.Duration `json:"dial_timeout"`
 }
 
 // NewWorkerPool - Factory for creating a WorkerPool object
 // from a Config
-func NewWorkerPool(h JobHandler) (*WorkerPool, error) {
+func NewWorkerPool(h StreamingHandler) (*WorkerPool, error) {
 
 	// Open the Config File...
 	k := parseConfig(
@@ -43,29 +43,27 @@ func NewWorkerPool(h JobHandler) (*WorkerPool, error) {
 	workCfg := k.(*WorkParams)
 
 	// Init Connection
-	c, err := net.DialTimeout(
+	l, err := net.Listen(
 		"tcp",
 		fmt.Sprintf("%s:%s", workCfg.Host, workCfg.Port),
-		workCfg.DialTimeout,
 	)
 
 	// Difficult to Test, but this MUST be a Fatal Exit
 	if err != nil {
 		log.WithFields(
-			log.Fields{"Error": err},
-		).Fatal("Failed to Dial Producer")
+			log.Fields{
+				"Error": err,
+				"Host":  workCfg.Host,
+				"Port":  workCfg.Port,
+			},
+		).Fatal("Could Not Listen on Addr")
 	}
 
-	log.WithFields(
-		log.Fields{
-			"Local Addr":  c.LocalAddr().String(),
-			"Remote Addr": c.RemoteAddr().String()},
-	).Info("New WorkerPool")
-
 	return &WorkerPool{
-		Connection: c,
-		Params:     workCfg,
-		Handler:    h,
-		Pending:    make(chan JobInstance, workCfg.MaxBuffer),
+		Listener: l,
+		Params:   workCfg,
+		Handler:  h,
+		Pending:  make(chan *JobInstanceMsg),
+		Results:  make(chan *JobInstanceMsg),
 	}, nil
 }

@@ -13,9 +13,9 @@ RUN go build -o ./cmd/ocelot-server/server ./cmd/ocelot-server/  &&\
 ENV OCELOT_HOST=127.0.0.1 \
     OCELOT_PORT=2151 \
     OCELOT_LISTEN_ADDR=0.0.0.0:2151 \ 
-    OCELOT_SERVER_CFG=./cmd/cfg/ocelot_server_cfg.yml \
+    OCELOT_PRODUCER_CFG=./cmd/cfg/ocelot_producer_cfg.yml \
     OCELOT_WORKER_CFG=./cmd/cfg/ocelot_worker_cfg.yml
 
 EXPOSE 2151
 
-ENTRYPOINT ["./cmd/ocelot-server/server"]
+ENTRYPOINT ["./cmd/ocelot-grpc/client"]

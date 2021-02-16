@@ -3,37 +3,64 @@ package ocelot
 
 import (
 	"context"
-	"encoding/gob"
-	"net"
+	"errors"
+	"io"
 	"os"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 )
 
-// Attach to Producer??
-var serverquitCh = make(chan int, 1)
+var (
+	// ErrOpenConnections - This error is reported through PubSub.Errors() when a channel through which messages are sent is full.
+	ErrOpenConnections = errors.New("no more connection pool slots")
+)
 
 // Producer - Object that Manages the Scheduler/Producer/Server
 type Producer struct {
-	// Listener, to accept incoming connections
-	listener net.Listener
-
 	// JobPool, used to pool tickers from multiple jobs to one
 	// see full description of struct's fields in jobpool.go
-	pool *JobPool
+	pool     *JobPool
+	connPool *connPool
+	config   *ProducerConfig
+	quitCh   chan bool
+}
 
+// ProducerConfig - Factory Struct for Producer
+type ProducerConfig struct {
+	// Addresses to Listen for New Workers - Supports
+	// Standard IPV4 addressing conventions e.g.
+	// [::]:2151, 127.0.0.1:2151, etc...
+	ListenAddr []string `json:"listen_addr"`
+
+	// Max Active Connections to producer
+	MaxConn int `json:"max_connections"`
+
+	// List of Jobs to Init on Server Start
+	JobCfgs []*JobConfig `json:"jobs"`
+
+	// Non-negative Integer representing the max jobs held in
+	// Producer-side job channel
+	JobChannelBuffer int `json:"job_channel_buffer"`
+
+	// Default Timeout for Sends to Staging Channnel
+	JobTimeout time.Duration `json:"job_timeout"`
+
+	// Buffer for the pool of multiple jobs sharing one handler...
+	HandlerBuffer int `json:"handler_buffer"`
+}
+
+// Used to manage incoming connections, allows N connections to
+// `openConnections` based on the weight given to `sem`
+type connPool struct {
 	// Semaphore used to manage max connections available to
-	// the object
 	sem *semaphore.Weighted
-
-	// See desc...
-	config *ProducerConfig
-
-	// Record and count of open connections...
-	openConnections []*net.Conn
+	// Record of open connections
+	openConnections []OcelotWorkerClient
 }
 
 // NewProducer - Create New Server, Initializes listener and
@@ -41,243 +68,144 @@ type Producer struct {
 func NewProducer() (*Producer, error) {
 
 	cfgServer := parseConfig(
-		os.Getenv("OCELOT_SERVER_CFG"),
+		os.Getenv("OCELOT_PRODUCER_CFG"),
 		&ProducerConfig{},
 	).(*ProducerConfig)
 
 	// Create Jobs from Config
 	jobs := make([]*Job, len(cfgServer.JobCfgs))
-	for i, jcfg := range cfgServer.JobCfgs {
-		jobs[i] = yieldJob(jcfg)
-	}
 
-	l, err := net.Listen("tcp", cfgServer.ListenAddr)
-	if err != nil {
-		log.WithFields(
-			log.Fields{"Addr": cfgServer.ListenAddr},
-		).Fatal("Could Not Listen on Addr")
+	for i, jcfg := range cfgServer.JobCfgs {
+		jobs[i] = createNewJob(jcfg)
 	}
 
 	// Create Producer, filling in values required from config
 	p := Producer{
-		listener: l,
 		pool: &JobPool{
-			jobs: jobs,
-			workCh: make(
-				map[string]chan (*JobInstance),
-				cfgServer.JobChannelBuffer,
-			),
-			wg: sync.WaitGroup{},
+			jobs:  jobs,
+			wg:    sync.WaitGroup{},
+			stgCh: make(chan (*JobInstanceMsg), cfgServer.JobChannelBuffer),
 		},
-		config:          cfgServer,
-		openConnections: make([]*net.Conn, cfgServer.MaxConn),
-		sem:             semaphore.NewWeighted(int64(cfgServer.MaxConn)),
-	}
-
-	// Init Channels for each Unique Handler...
-	for _, j := range cfgServer.JobCfgs {
-		handlerType := j.Params["type"].(string)
-
-		if _, ok := p.pool.workCh[handlerType]; !ok {
-			p.pool.workCh[handlerType] = make(chan *JobInstance, cfgServer.HandlerBuffer)
-		}
+		config: cfgServer,
+		connPool: &connPool{
+			openConnections: make([]OcelotWorkerClient, cfgServer.MaxConn),
+			sem:             semaphore.NewWeighted(int64(cfgServer.MaxConn)),
+		},
+		quitCh: make(chan bool, 1),
 	}
 
 	return &p, nil
 }
 
-// decodeOneMesage - decode a single message from a connection
-// Opens new decoder on a connection and returns one and only
-// one message
-func decodeOneMesage(c net.Conn) (msg string, err error) {
-	dec := gob.NewDecoder(c)
-	err = dec.Decode(&msg)
-	if err != nil {
-		return "", err
-	}
-	return msg, nil
-}
+// StartJobs - Calls Forward JobInstances from individual Job producers'
+// channels to the central JobPool Channel. Called on server start.
+// TODO: What do subsequent calls to p.StartJobs do?
+func (p *Producer) StartJobs() {
 
-// checkHandlerExists - does O(1) lookup to the JobChannels
-// returns true if key exists
-func (p *Producer) checkHandlerExists(msg string) bool {
-	_, ok := p.pool.workCh[msg]
-	return ok
-}
+	p.pool.wg.Add(len(p.pool.jobs))
 
-// validateConnection - Handles incoming connections before
-// any work is assigned, rejects if server full
-func (p *Producer) validateConnection(c net.Conn) bool {
-	if p.sem.TryAcquire(1) {
-		// Grab next empty slot
-		for i, oc := range p.openConnections {
-			if oc == nil {
-				p.openConnections[i] = &c
-				break
-			}
-		}
-		return true
-	}
-
-	log.WithFields(
-		log.Fields{
-			"Permitted Conns": p.config.MaxConn,
-		},
-	).Debug("Rejected Connection - Too Many Connections")
-	c.Close()
-	return false
-}
-
-// terminateConnection - Teardown for a connection; decriment
-// count, release sem, and close connection
-func (p *Producer) terminateConnection(c net.Conn) {
-	p.sem.Release(1)
-	c.Close()
-	log.Warn("Worker Connection Being Terminated...")
-}
-
-// handleConnection - Handles incoming connections from workers
-// Forwards jobInstances from JobChan to a worker.
-func (p *Producer) handleConnection(ctx context.Context, c net.Conn) {
-
-	defer p.terminateConnection(c)
-
-	// First, recieve message from worker indicating what worker's
-	// handler is; route jobs based on the recieved handler name
-	handlerType, err := decodeOneMesage(c)
-	if err != nil {
-		log.Warnf("Error on Decode Handler Type %v", err)
-		return
-	}
-
-	// Do not use a connection slot on a worker servicing no jobs
-	if !p.checkHandlerExists(handlerType) {
-		log.Warnf("Handler Does Not Have Any Current Jobs - Booting")
-		return
-	}
-
-	// Create a new encoder to send job Instances over the wire
-	// as reecieved
-	enc := gob.NewEncoder(c)
-
-	// TODO: This is unneeded overhead, find way to exclude this.
-	// Create a minmal representation of the Instance struct to test
-	// the decoder before sending a job. Do not want to dispatch a job
-	// to a worker that's unable to recieve
-	dec := gob.NewDecoder(c)
-
-	// 1 Byte Struct "canary" is minimum struct that shares vals w. JobInstance
-	var canary struct {
-		Success bool
-	}
-
-	for {
-		select {
-
-		// On Cancel, exit this (and all other) open connections
-		case <-ctx.Done():
-			log.WithFields(
-				log.Fields{"Producer Addr": c.LocalAddr().String()},
-			).Error("Server Terminated - Got Kill Signal")
-			return
-
-		// On recieve tick
-		case j := <-p.pool.workCh[handlerType]:
-			// Test read the value on the connection into canary, Set short
-			// (BUT POSITIVE, NOT 0ms) read Timeout to force either i/o
-			// timeout (do nothing) or closed pipe (shutdown an retry)
-			c.SetReadDeadline(time.Now().Add(time.Millisecond * 5))
-			if err := dec.Decode(&canary); err != nil {
-				if netError, ok := err.(net.Error); ok && netError.Timeout() {
-					// Do Nothing...
-				} else { // TODO: Check if this can block
-					log.WithFields(
-						log.Fields{"Instance ID": j.InstanceID},
-					).Warnf("Failed to Dispatch Job on Read (Retry): %v", err)
-					p.pool.workCh[handlerType] <- j
-					return
-				}
-			}
-
-			// Encode and send the jobInstance for worker to process
-			err = enc.Encode(&j)
-			log.WithFields(
-				log.Fields{"Instance ID": j.InstanceID},
-			).Info("Dispatched Job")
-
-			if err != nil { // TODO: Check if this can block
-				// If there is an error, recycle this job back into the channel
-				log.WithFields(
-					log.Fields{"Instance ID": j.InstanceID},
-				).Warnf("Failed to Dispatch Job (Retry): %v ", err)
-				p.pool.workCh[handlerType] <- j
-				return
-			}
-		}
-	}
-}
-
-// Serve - Serve the producer, validate and accept all
-// incoming worker connections
-func (p *Producer) Serve(ctx context.Context, cancel context.CancelFunc) error {
-
-	log.WithFields(
-		log.Fields{"Host": p.listener.Addr().String()},
-	).Info("Started Server")
-
-	// Start all schedules on server start
 	for _, j := range p.pool.jobs {
 		go p.pool.startSchedule(j)
 	}
 
-	// Call gather to forward each individual job's schedule to
-	// intermediate channels for each handler type
-	p.pool.gatherJobs()
+	go func() {
+		p.pool.wg.Wait()
+	}()
+}
 
-	for {
-		// Accept Incoming Connections; Single threaded through here...
-		c, err := p.listener.Accept()
-		if err != nil {
-			select {
-			case <-serverquitCh:
-				return nil
-			default:
-				// TODO: Implement Shutdown Logic Here...
-				cancel()
+// StartJob -  public API wrapper around jp.startSchedule(), replicates
+// behavior of p.StartJobs() for a new, user defined job. Does not need to
+// be called with server start
+func (p *Producer) StartJob(j *Job) {
+	p.pool.wg.Add(1)
+	go p.pool.startSchedule(j) // Start Producer - Start Ticks
+	p.pool.jobs = append(p.pool.jobs, j)
+}
+
+// RegisterNewStreamingWorker - Adds a worker machine to the producer's connection
+// pool that handles bi-directional stream based work
+func (p *Producer) RegisterNewStreamingWorker(addr string) bool {
+
+	var (
+		waitCh = make(chan bool)   // Cancellation Channel Both Send & Recv Legs
+		ji     = &JobInstanceMsg{} // Dummy JobInstance
+	)
+
+	// Check if there are slots available, connect or return error and exit
+	c, err := p.handleWorkerAssignment(addr)
+	if err != nil {
+		// Cannot connect - Exit
+		log.WithFields(
+			log.Fields{"Err": err},
+		).Warn("Worker Not Registered")
+	}
+
+	stream, err := c.ExecuteStream(context.Background())
+	if err != nil {
+		// Cannot open stream - Exit
+		log.WithFields(
+			log.Fields{"Err": err},
+		).Warnf("Failed to Open Stream")
+		return false
+	}
+
+	// Start One goroutine to recieve content back from the worker, in this
+	// case, the job status
+	go func() {
+		for {
+			// While Data && !io.EOF, write to Producer side logs below
+			ji, err := stream.Recv()
+			if err == io.EOF {
+				close(waitCh)
+				return
 			}
-		}
 
-		// Allow if open connection slot(s), otherwise boot
-		if p.validateConnection(c) {
-			go p.handleConnection(ctx, c)
+			log.WithFields(
+				log.Fields{"Success": ji.Success, "CTime": ji.Ctime, "MTime": ji.Mtime},
+			).Info("Recv Result")
+		}
+	}()
+
+	// Start one goroutine to send jobs to the worker
+	for {
+		select {
+		case ji = <-p.pool.stgCh:
+			log.Infof("Sent Msg: %+v", ji)
+			if err := stream.Send(ji); err != nil {
+				log.WithFields(
+					log.Fields{"Err": err, "Conn": c},
+				).Warn("Failed to Send Message - Exiting")
+				stream.CloseSend()
+				<-waitCh
+			}
 		}
 	}
 }
 
-// ShutDown - TODO: Roughly (more forcefully) emulate the behavior of the net/http
-// close procedure, quoted below:
-// 	- Close all open listeners
-//	- Close all idle connections,
-// 	- Wait indefinitely for connections to return to idle and then shut down.
-func (p *Producer) ShutDown(ctx context.Context, cancel context.CancelFunc) error {
+func (p *Producer) handleWorkerAssignment(addr string) (OcelotWorkerClient, error) {
 
-	// Call to cancel handles closing idle connections.
-	// cancel() -> call to ctx.Done() for all connections which forces handleConnections
-	// to exit, closing the connection & halting any more outgoing jobs
-	cancel()
-
-	// Send Break...
-	close(serverquitCh)
-
-	// Close all open listeners
-	p.listener.Close()
-
-	// Stop all producers -
-	// NOTE: current implementation of StopJob just pops the first job from the
-	// List, so just call w. no args N times, where N is total num of jobs registered
-	for range p.pool.jobs {
-		p.pool.StopJob()
+	// Producer Dials a Worker...
+	conn, err := grpc.Dial(addr, grpc.WithInsecure())
+	if err != nil {
+		// Returns some form of Net.Error/GRPC.Error re; dial failure
+		// shouldn't be fatal, producer can have many workers...
+		return nil, err
 	}
 
-	return nil
+	// Instatiates new NewOcelotWorkerClient; this is the meanignful
+	// connection...
+	c := NewOcelotWorkerClient(conn)
+
+	// Grab next empty slot available on the connPool
+	if p.connPool.sem.TryAcquire(1) {
+		for i, oc := range p.connPool.openConnections {
+			if oc == nil {
+				p.connPool.openConnections[i] = c
+				return c, nil
+			}
+		}
+	}
+
+	// No Connection Slots Remain - Specific Error
+	return nil, ErrOpenConnections
 }

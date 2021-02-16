@@ -1,0 +1,17 @@
+{
+   "job_channel_buffer": 10,
+   "max_connections": 2,
+   "handler_buffer": 5,
+   "jobs": [
+      {
+         "tdelta_ms": 1900,
+         "stg_buffer": 0,
+         "params": {
+            "type": "S3",
+            "bucket": "ocelot-cctv",
+            "key": "Screen Shot 2020-12-07 at 8.09.20 PM.png"
+         }
+      }
+   ]
+}
+  

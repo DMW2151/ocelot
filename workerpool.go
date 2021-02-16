@@ -25,7 +25,7 @@ type WorkerPool struct {
 	RPCServer *grpc.Server
 	// Most likely User defined function of type
 	// JobHandler that workers in this pool execute
-	Handler StreamingHandler
+	Handler Handler
 	mu      sync.Mutex
 }
 
@@ -35,36 +35,13 @@ func (wp *WorkerPool) Execute(ctx context.Context, ji *JobInstanceMsg) (*JobInst
 	return ji, nil
 }
 
-// ExecuteStream -
+// ExecuteStream -If you implement the interface, then cool, no need to define multiple methods for streaming
+// for each hanler...
 func (wp *WorkerPool) ExecuteStream(stream OcelotWorker_ExecuteStreamServer) error {
-
-	// Process Values by Sending them to wp.Pending
-	go func() {
-		for {
-			log.Debug("Worker Recieved Value...")
-			in, err := stream.Recv()
-			// Send Value to WorkerPool Pending Channel, where work is
-			log.Debug("Sent Value To Worker ")
-			if err == io.EOF {
-				return
-			}
-
-			if err != nil {
-				return
-			}
-
-			wp.Pending <- in
-		}
-	}()
-
-	// Send Response Back to Manager - Recieve from rCh, where
-	// Work is sent once completed
-	for {
-		if err := stream.Send(<-wp.Results); err != nil {
-			log.Errorf("Called Execute Stream: %+v", err)
-			return err
-		}
+	if err := handleStreamData(wp.Handler, stream, wp.Results); err != nil {
+		return err
 	}
+	return nil
 }
 
 // Serve - Listens for work coming from server...
@@ -119,7 +96,6 @@ func (wp *WorkerPool) start(ctx context.Context, wg *sync.WaitGroup) {
 	// Or Basic
 	for {
 		k = <-wp.Pending
-		log.Info("Handler Got Value..")
 		wp.Handler.Work(k, wp.Results) // Do the Work; Call the Function...
 	}
 

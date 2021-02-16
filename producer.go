@@ -149,7 +149,7 @@ func (p *Producer) RegisterNewStreamingWorker(addr string) bool {
 		return false
 	}
 
-	// Start One goroutine to recieve content back from the worker, in this
+	// Start one goroutine to recieve content back from the worker, in this
 	// case, the job status
 	go func() {
 		for {
@@ -161,7 +161,11 @@ func (p *Producer) RegisterNewStreamingWorker(addr string) bool {
 			}
 
 			log.WithFields(
-				log.Fields{"Success": ji.Success, "CTime": ji.Ctime, "MTime": ji.Mtime},
+				log.Fields{
+					"Success": ji.GetSuccess(),
+					"CTime":   time.Unix(ji.GetCtime(), 0),
+					"MTime":   time.Unix(ji.GetMtime(), 0),
+				},
 			).Info("Recv Result")
 		}
 	}()

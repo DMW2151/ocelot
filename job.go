@@ -44,12 +44,11 @@ type JobConfig struct {
 func createNewJob(jc *JobConfig) *Job {
 
 	// Generate Static Hash for Each Job If UUID is Not Generated
-	// TODO: WARNING: UUIDs collide if Jobs have identical params, but
-	// unique handlers, schedules, etc. resolve.
 	if jc.ID == uuid.Nil {
 		jc.ID = generateStaticUUID(
-			[]byte(fmt.Sprintf("%v", jc.Params)),
-		)
+			[]byte(
+				fmt.Sprintf("%v%s", jc.Params, fmt.Sprint(jc.Tdelta)),
+			))
 	}
 
 	// NOTE: No longer need this? Before req. channel > 0, now any non-neg value
@@ -63,7 +62,7 @@ func createNewJob(jc *JobConfig) *Job {
 
 	return &Job{
 		ID:     jc.ID,
-		stgCh:  make(chan *JobInstanceMsg, 0),
+		stgCh:  make(chan *JobInstanceMsg, jc.StgBuffer),
 		quitCh: make(chan bool, 1),
 		ticker: time.NewTicker(jc.Tdelta * time.Millisecond), // Convert to milliS from nanoS
 		params: jc.Params,

@@ -31,7 +31,7 @@ func (jp *JobPool) sendInstance(j *Job, t time.Time) {
 	case <-time.After(time.Millisecond * 100):
 		log.WithFields(
 			log.Fields{"Job ID": j.ID},
-		).Debug("JobInstance Timeout")
+		).Debug("JobInstance Timeout - Dropped Job")
 	}
 }
 

@@ -2,59 +2,107 @@
 package ocelot
 
 import (
-	"math/rand"
+	"io"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
+	log "github.com/sirupsen/logrus"
 )
 
-// JobHandler - Interface for Object that processes
-// a jobInstance
-type JobHandler interface {
-	Work(j *JobInstance) error
+// UnaryHandler - Interface that processes incoming values using unary
+// method, I.E, One Request -> One Response
+type Handler interface {
+	Work(j *JobInstanceMsg, rCh chan *JobInstanceMsg) error
 }
 
-// S3Handler - Handler for Managing S3 Downloads
+// NilHandler - Dummy Handler; Allows for Ping-Pong between GRPC client and
+// server, does no work aside from marking mtime and success. Implements both
+// UnaryHandler and StreamingHandler Interface
+type NilHandler struct{}
+
+// S3Handler - Handler for Managing S3 Downloads; Implements both UnaryHandler
+// and StreamingHandler Interface
 type S3Handler struct {
-	Client *session.Session
+	Session *session.Session
+	Client  *s3.S3
 }
 
-// MockHTTPHandler - For Testing HTTP Calls
-type MockHTTPHandler struct{}
-
-// Work - Required to Implement Handler Interface
-// WARNING: DO NOT KEEP THIS!!
-func (sh S3Handler) Work(ji *JobInstance) error {
+// Work - Required to Implement JobHandler Interface(s)
+func (nh NilHandler) Work(ji *JobInstanceMsg, rCh chan *JobInstanceMsg) error {
 	return nil
-	//var err error
-
-	// Init Service on reach Req, Recycle Underlying Session
-	// svc := s3.New(session.Must(sh.Client, err))
-
-	// // In this case; the values in ji.Job.Params take precidence
-	// // over ji.Job.Path
-	// output, err := svc.GetObject(
-	// 	&s3.GetObjectInput{
-	// 		Bucket: aws.String(ji.Job.Params["bucket"].(string)),
-	// 		Key:    aws.String(ji.Job.Params["key"].(string)),
-	// 	},
-	// )
-
-	// if err != nil {
-	// 	log.Warnf("Failed to Download: %e", err)
-	// 	return err
-	// }
-
-	// // Other Logic Implemented here; why did this spit out...
-	// log.Info(fmt.Sprint(*output.ContentLength))
-	// return nil
 }
 
-// Work - Required to Implement Handler Interface
-// Not an HTTP Call; Just Waits 50-300ms for timing...
-func (m *MockHTTPHandler) Work(ji *JobInstance) error {
-	time.Sleep(
-		time.Duration(rand.Intn(250)+50.0) * time.Millisecond,
+// Work - Required to Implement JobHandler Interface(s) - Downloas a File
+func (sh S3Handler) Work(ji *JobInstanceMsg, rCh chan *JobInstanceMsg) error {
+
+	// TODO: Init a new service on each request (if needed) while persisting the
+	// underlying session in the struct (??)
+
+	params := ji.GetParams()
+
+	// In this case; the values in ji.Job.Params take precidence
+	// over ji.Job.Path
+	_, err := sh.Client.HeadObject(
+		&s3.HeadObjectInput{
+			// WARNING: Using Conversions from pb.any.Any -> Interface{} -> string
+			// Can produce unexpected results, validate upstream that in  this
+			// case params.bucket && params.key are string-like...
+			Bucket: aws.String(string(params["bucket"])),
+			Key:    aws.String(string(params["key"])),
+		},
 	)
-	return nil
+
+	// Log failure to get headObject
+	/*
+		TODO: Other Logic Implemented here - This can be Any Work
+		with the file, can be more complex than just getting object headers
+	*/
+	if err != nil {
+		// Success Status == false on init, no need to re-mark as false...
+		// TODO: Send Specific Errors back to the Producer...
+		log.WithFields(
+			log.Fields{
+				"Bucket": string(params["bucket"]),
+				"Key":    string(params["key"]),
+				"Err":    err,
+			},
+		).Warn("Failed to Access S3 File")
+	} else {
+		ji.Success = true
+	}
+
+	rCh <- ji
+	ji.Mtime = time.Now().UnixNano()
+	return err
+
+}
+
+// handleStreamData - For brevity in `StreamWork` methods, forwards
+// stream data to the Work method
+func handleStreamData(jh Handler, stream OcelotWorker_ExecuteStreamServer, rCh chan *JobInstanceMsg) error {
+	go func() {
+		for {
+			in, err := stream.Recv()
+			if err == io.EOF {
+				//return nil
+			}
+			if err != nil {
+				// return err
+			}
+
+			_ = jh.Work(in, rCh)
+		}
+	}()
+
+	// Send Response Back to Manager - Recieve from rCh, where
+	// Work is sent once completed
+	for {
+		if err := stream.Send(<-rCh); err != nil {
+			log.Errorf("Called Execute Stream: %+v", err)
+			return err
+		}
+	}
+
 }

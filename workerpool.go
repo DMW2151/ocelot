@@ -3,170 +3,99 @@ package ocelot
 
 import (
 	"context"
-	"encoding/gob"
-	"io"
 	"net"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 )
+
+var exit chan bool
 
 // WorkerPool - net.Conn with WorkParams attached. WorkParams
 // set channel buffering, concurrency, etc. of WorkerPool
+// TODO: Some reflect Magic to determine streaming or basic handler...
 type WorkerPool struct {
-	Connection net.Conn
-	Params     *WorkParams
-	Pending    chan JobInstance
-
+	Listener  net.Listener
+	Params    *WorkParams
+	Pending   chan *JobInstanceMsg
+	Results   chan *JobInstanceMsg
+	RPCServer *grpc.Server
 	// Most likely User defined function of type
 	// JobHandler that workers in this pool execute
-	Handler JobHandler
+	Handler Handler
+	mu      sync.Mutex
+}
+
+// Execute -
+func (wp *WorkerPool) Execute(ctx context.Context, ji *JobInstanceMsg) (*JobInstanceMsg, error) {
+	wp.Pending <- ji
+	return ji, nil
+}
+
+// ExecuteStream -If you implement the interface, then cool, no need to define multiple methods for streaming
+// for each hanler...
+func (wp *WorkerPool) ExecuteStream(stream OcelotWorker_ExecuteStreamServer) error {
+	if err := handleStreamData(wp.Handler, stream, wp.Results); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Serve - Listens for work coming from server...
+func (wp *WorkerPool) Serve(ctx context.Context, cancel context.CancelFunc) {
+
+	// Start Workers in the background and consume from pending channel
+	// once a  producer is connected, they will push to pending...
+	sessionUUID, _ := uuid.NewUUID()
+	wp.startWorkers(ctx, sessionUUID)
+
+	// Register as RPC Server - Needs an Execute Method; Whichh Should
+	// Put a Value into the Channel...
+	grpcServer := grpc.NewServer()
+	RegisterOcelotWorkerServer(grpcServer, wp)
+
+	log.Infof("Starting WorkerPool on: %s", wp.Listener.Addr())
+
+	if err := grpcServer.Serve(wp.Listener); err != nil {
+		log.Fatalf("failed to serve: %s", err)
+	}
+
 }
 
 // StartWorkers - Start Workers, runs `wp.Params.NWorkers`
-func (wp *WorkerPool) StartWorkers(ctx context.Context, sessionuuid uuid.UUID) {
+func (wp *WorkerPool) startWorkers(ctx context.Context, sessionuuid uuid.UUID) {
 
 	var wg sync.WaitGroup
 
 	wg.Add(wp.Params.NWorkers)
 	for i := 0; i < wp.Params.NWorkers; i++ {
-		go wp.start(ctx, &wg, sessionuuid)
+		go wp.start(ctx, &wg)
 	}
 
 	log.WithFields(
 		log.Fields{
 			"Session ID": sessionuuid,
-			"Local Addr": wp.Connection.LocalAddr().String(),
 		},
 	).Debugf("Started %d Workers", wp.Params.NWorkers)
 
 	go func() { wg.Wait() }()
 }
 
-// AcceptWork - Listens for work coming from server...
-func (wp *WorkerPool) AcceptWork(ctx context.Context, cancel context.CancelFunc) {
-
-	var (
-		errChan   = make(chan error, 10)
-		j         JobInstance
-		dec       = gob.NewDecoder(wp.Connection)
-		t         = time.NewTicker(time.Millisecond * 10000) // TESTING
-		sessionID = uuid.New()
-	)
-
-	wp.StartWorkers(ctx, sessionID)
-
-	// Send Initial Message To Server ...
-	enc := gob.NewEncoder(wp.Connection)
-	enc.Encode(&wp.Params.HandlerType)
-
-	go func() {
-		// Constantly Read from the Connection and write work into the pool
-		for {
-			err := dec.Decode(&j)
-			if err != nil { // If Error Is Not Nil; Check for Op Error
-				switch t := err.(type) {
-
-				case *net.OpError:
-					log.Errorf("Halt Worker on Op Error: %v", err)
-					dec = nil
-					close(errChan)
-					return
-				}
-			}
-
-			log.WithFields(
-				log.Fields{
-					"Instance ID": j.InstanceID,
-				},
-			).Tracef("Worker Read Job: %v", err)
-			errChan <- err
-		}
-	}()
-
-	for {
-		// The Decoder reads data from server and marshals into a Job object
-		// values from errChan will be nil
-
-		select {
-
-		case err := <-errChan:
-			// Either Server Encoder buffer is off and cannot be recovered,
-			// or Client has been closed and buffer is incomplete -> Cancel & Exit
-			if (err != nil) && (err != io.EOF) {
-				log.Errorf("Failed to Unmarshal Job From Server: %v", err)
-				cancel()
-				return
-			}
-
-			// Server has shutdown (or otherwise sent no data)
-			if err == io.EOF {
-				log.WithFields(
-					log.Fields{"Session ID": sessionID},
-				).Errorf("Connection Closed Via Server: %v", err)
-				cancel()
-				return
-			}
-			// No Errors -> Send Job to WorkerPool
-			wp.Pending <- j
-
-		// Recieves a Cancelfunc() call; begin Workerpool Exit
-		case <-ctx.Done():
-			log.WithFields(
-				log.Fields{"Session ID": sessionID},
-			).Warn("WorkerPool Shutdown")
-			wp.Close()
-			return
-
-		// TESTING: Workers recieve remaining jobs, depending on the buffer size,
-		// this can take a bit...
-		case <-t.C:
-			log.WithFields(
-				log.Fields{"Session ID": sessionID},
-			).Warn("WorkerPool Timeout")
-
-			cancel()
-		}
-
-	}
-}
-
 // start - Execute the Worker
 // Write back to server; sends whenever job is done...
 // Shouldn't encode multiple jobs before read..
-func (wp *WorkerPool) start(ctx context.Context, wg *sync.WaitGroup, sessionuuid uuid.UUID) {
+func (wp *WorkerPool) start(ctx context.Context, wg *sync.WaitGroup) {
+
+	log.Debug("Worker Started...")
 	defer wg.Done()
-
-	for ji := range wp.Pending {
-		// Do the Work; Call the Function...
-		err := wp.Handler.Work(&ji)
-
-		// Report Results to logs
-		if err != nil {
-			ji.Success = false
-		} else {
-			ji.Success = true
-		}
-
-		log.WithFields(
-			log.Fields{"Instance ID": ji.InstanceID},
-		).Info("WorkerPool Finished Job")
-
+	var k *JobInstanceMsg
+	// TODO: Reflect Magic To Determine if Handler is Streaming
+	// Or Basic
+	for {
+		k = <-wp.Pending
+		wp.Handler.Work(k, wp.Results) // Do the Work; Call the Function...
 	}
-}
 
-// Close - Wrapper around the net.Conn close function, also
-// Closes the Pool's Pending channel
-// On close - Release Connection && Pool's Pending Channel
-func (wp *WorkerPool) Close() {
-	log.WithFields(
-		log.Fields{
-			"Remote": wp.Connection.RemoteAddr().String(),
-			"Local":  wp.Connection.LocalAddr().String(),
-		}).Warn("Connection Closed...")
-
-	wp.Connection.Close()
-	close(wp.Pending)
 }

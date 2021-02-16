@@ -1,0 +1,35 @@
+{
+   "job_channel_buffer": 10,
+   "max_connections": 2,
+   "handler_buffer": 5,
+   "jobs": [
+      {
+         "tdelta_ms": 900,
+         "stg_buffer": 0,
+         "params": {
+            "type": "S3",
+            "bucket": "ocelot-cctv_0",
+            "key": "Screen Shot 2020-12-07 at 8.09.20 PM.png"
+         }
+      },
+      {
+         "tdelta_ms": 1900,
+         "stg_buffer": 0,
+         "params": {
+            "type": "S3",
+            "bucket": "ocelot-cctv_1",
+            "key": "Screen Shot 2020-12-07 at 8.09.20 PM.png"
+         }
+      },
+      {
+         "tdelta_ms": 2900,
+         "stg_buffer": 0,
+         "params": {
+            "type": "S3",
+            "bucket": "ocelot-cctv_2",
+            "key": "Screen Shot 2020-12-07 at 8.09.20 PM.png"
+         }
+      }
+   ]
+}
+  

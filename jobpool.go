@@ -1,66 +1,73 @@
 package ocelot
 
 import (
-	"context"
 	"sync"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
 
-// JobPool - Collection of Jobs registered on the producer
+// JobPool - Collection of jobs that are currently active on the producer
 type JobPool struct {
-	jobs   []*Job
-	workCh map[string]chan *JobInstance // workCh is a misleading name...
-	wg     sync.WaitGroup
-}
-
-// StartJob - Exported wrapper around j.startSchedule()
-func (jp *JobPool) StartJob(ctx context.Context, j *Job) {
-	jp.wg.Add(1)
-	go jp.startSchedule(j) // Start Producer - Start Ticks
-	go jp.Forward(j)       // Start Job Forwarder - Start Job.StgChananel -> jp.JobChan
-	jp.jobs = append(jp.jobs, j)
-}
-
-// Forward - Forward all incoming jobInstances and release
-// the WaitGroup When j.stgCh has been closed...
-func (jp *JobPool) Forward(j *Job) {
-
-	// Close Job's staging channel and decrement the counter
-	// on function exit
-	defer func() {
-		jp.wg.Done()
-		log.WithFields(
-			log.Fields{"Job ID": j.ID},
-		).Warn("Staging Stopped - No Longer Forwarding Job")
-	}()
-
-	// Route to correct channel based on handlerType; cannot close this
-	// when just one job closes...
-	for ji := range j.stgCh {
-		log.WithFields(
-			log.Fields{"Job ID": j.ID, "Instance ID": ji.InstanceID},
-		).Info("JobInstance Created")
-		jp.workCh[j.params["type"].(string)] <- ji
-	}
-}
-
-// gatherJobs - Calls Forward JobInstances from individual Job producers'
-// channels to the central JobPool Channel
-func (jp *JobPool) gatherJobs() {
-
-	jp.wg.Add(len(jp.jobs))
-	for _, j := range jp.jobs {
-		go jp.Forward(j)
-	}
+	jobs  []*Job
+	stgCh chan *JobInstanceMsg
+	wg    sync.WaitGroup
 }
 
 // StopJob - Access the underlying job in JobPool by stoping the ticker
-// WARNING: A violation of close on producer side rule...
-// StopJob close the producer (the ticker), which later causes gatherJobs
-// to close the staging channel...
+// WARNING: Dummy Implementation - Should Stop Jobs by ID or Path; NOT 1st Object
 func (jp *JobPool) StopJob() {
-	// WARNING: Dummy Implementation - Should Stop Jobs by ID or Path; NOT 1st Object
-	// by FIFO...
 	jp.jobs[0].quitCh <- true
+}
+
+// sendInstance - creates new JobInstance and sends to job's staging channel
+func (jp *JobPool) sendInstance(j *Job, t time.Time) {
+
+	// Instatiates new JobInstance. If the stgCh is not available for
+	// send within timeout interval (default: 100ms) then drop this JobInstance
+	select {
+
+	case jp.stgCh <- j.newJobInstance(t):
+	case <-time.After(time.Millisecond * 100):
+		log.WithFields(
+			log.Fields{"Job ID": j.ID},
+		).Debug("JobInstance Timeout - Dropped Job")
+	}
+}
+
+// startSchedule - Start a Job's Ticker, sending JobInstances on a fixed
+// Tdelta. Function sends event from ticker.C -> j.Staging
+func (jp *JobPool) startSchedule(j *Job) {
+
+	defer func() {
+		// On exit, clean up all resources to prevent leaking, closes
+		// `j.stgCh` and stops the underlying ticker
+		j.ticker.Stop()
+		close(j.stgCh)
+		log.WithFields(
+			log.Fields{"Job ID": j.ID},
+		).Warn("Ticker Stopped - No Longer Producing Job")
+		jp.wg.Done()
+	}()
+
+	// Send first Job on schedule start
+	jp.sendInstance(j, time.Now())
+
+	for {
+
+		select {
+		// Ticks until quit signal recieved; use go j.sendInstance w. a timeout rather
+		// than w. default case to prevent blocking the kill signal or using a ton of CPU
+		case t := <-j.ticker.C:
+			go jp.sendInstance(j, t)
+
+		// Do not use a common context here. Each schedule has a unique quit sig b/c
+		// each job must be individually cancelable
+		case <-j.quitCh:
+			log.WithFields(
+				log.Fields{"Job ID": j.ID},
+			).Warn("JobPool Got Quit Sig")
+			return
+		}
+	}
 }

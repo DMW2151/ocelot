@@ -1,0 +1,8 @@
+{
+    "handler_type": "S3",
+    "n_workers": 5,
+    "max_buffer": 0,
+    "dial_timeout": 100000000,
+    "host": "${OCELOT_HOST}",
+    "port": "${OCELOT_PORT}"
+ }

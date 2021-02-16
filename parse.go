@@ -2,20 +2,14 @@ package ocelot
 
 import (
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"os"
 
 	log "github.com/sirupsen/logrus"
 )
 
-// Opens default server config at $OCELOT_CFG and creates a new producer config
-// object, opens a new server w.
-// YUCK: pass *T as interface, unmarshal into v and then convert back to concrete type???
-// 		cfg := parseConfig(
-// 			os.Getenv("OCELOT_WORKER_CFG"),
-// 			&WorkParams{},
-// 		).(*WorkParams)
+// Opens json file and passes into an interface - A pain to parse back to the
+// concrete type (see `Workerparams.NewWorkerPool`)
 func parseConfig(fp string, v interface{}) interface{} {
 
 	// Open config file...

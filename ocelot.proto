@@ -10,11 +10,11 @@ message JobInstanceMsg {
       int64 Ctime = 3; 
       int64 Mtime = 4;
       bool Success = 5;
-      // WARNING: Any type resolves map[string]interface{} - plenty of warnings
-      // online about how this might be subject to change
+      // WARNING: any.Any type resolves to map[string]interface{}, however plenty of 
+      // warnings online about how this might be subject to change; for time being 
+      // just use map string -> string
       map<string, string> Params = 6; 
 }
-
 
 
 service OcelotWorker {

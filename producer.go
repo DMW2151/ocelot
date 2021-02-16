@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	// ErrOpenConnections - This error is reported through PubSub.Errors() when a channel through which messages are sent is full.
+	// ErrOpenConnections - This error is reported...
 	ErrOpenConnections = errors.New("no more connection pool slots")
 )
 
@@ -170,7 +170,6 @@ func (p *Producer) RegisterNewStreamingWorker(addr string) bool {
 	for {
 		select {
 		case ji = <-p.pool.stgCh:
-			log.Infof("Sent Msg: %+v", ji)
 			if err := stream.Send(ji); err != nil {
 				log.WithFields(
 					log.Fields{"Err": err, "Conn": c},

@@ -32,7 +32,7 @@ type WorkParams struct {
 
 // NewWorkerPool - Factory for creating a WorkerPool object
 // from a Config
-func NewWorkerPool(h StreamingHandler) (*WorkerPool, error) {
+func NewWorkerPool(h Handler) (*WorkerPool, error) {
 
 	// Open the Config File...
 	k := parseConfig(

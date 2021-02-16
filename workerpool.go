@@ -3,7 +3,6 @@ package ocelot
 
 import (
 	"context"
-	"io"
 	"net"
 	"sync"
 

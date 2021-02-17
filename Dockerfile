@@ -10,11 +10,11 @@ RUN go get .
 RUN go build -o ./cmd/ocelot-server/server ./cmd/ocelot-server/  &&\
     go build -o ./cmd/ocelot-worker/worker ./cmd/ocelot-worker/ 
 
-ENV OCELOT_HOST=127.0.0.1 \
-    OCELOT_PORT=2151 \
-    OCELOT_LISTEN_ADDR=0.0.0.0:2151 \ 
-    OCELOT_PRODUCER_CFG=./cmd/cfg/ocelot_producer_cfg.yml \
-    OCELOT_WORKER_CFG=./cmd/cfg/ocelot_worker_cfg.yml
+ENV OCELOT_HOST=127.0.0.1\
+    OCELOT_PORT=2151\
+    OCELOT_LISTEN_ADDR=0.0.0.0:2151\ 
+    OCELOT_PRODUCER_CFG=./cmd/cfg/ocelot_producer_cfg.json\
+    OCELOT_WORKER_CFG=./cmd/cfg/ocelot_worker_cfg.json
 
 EXPOSE 2151
 

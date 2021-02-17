@@ -4,12 +4,12 @@ package ocelot
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
@@ -155,7 +155,9 @@ func (p *Producer) RegisterNewStreamingWorker(addr string) bool {
 		for {
 			// While Data && !io.EOF, write to Producer side logs below
 			ji, err := stream.Recv()
-			if err == io.EOF {
+			// Could be (err == io.EOF) to be more permissive here; mostly io.EOF
+			// or grpc.Terminaated errs...
+			if err != nil {
 				close(waitCh)
 				return
 			}
@@ -165,6 +167,7 @@ func (p *Producer) RegisterNewStreamingWorker(addr string) bool {
 					"Success": ji.GetSuccess(),
 					"CTime":   time.Unix(ji.GetCtime(), 0),
 					"MTime":   time.Unix(ji.GetMtime(), 0),
+					"Err":     err,
 				},
 			).Info("Recv Result")
 		}
@@ -174,12 +177,15 @@ func (p *Producer) RegisterNewStreamingWorker(addr string) bool {
 	for {
 		select {
 		case ji = <-p.pool.stgCh:
+
+			// If we recieve any error, INCLUDING EOF, Exit...
 			if err := stream.Send(ji); err != nil {
 				log.WithFields(
-					log.Fields{"Err": err, "Conn": c},
+					log.Fields{"Err": err},
 				).Warn("Failed to Send Message - Exiting")
 				stream.CloseSend()
 				<-waitCh
+				return false
 			}
 		}
 	}
@@ -187,8 +193,18 @@ func (p *Producer) RegisterNewStreamingWorker(addr string) bool {
 
 func (p *Producer) handleWorkerAssignment(addr string) (OcelotWorkerClient, error) {
 
+	// Auth - Static TLS Config
+	creds, err := credentials.NewClientTLSFromFile("certs/server.crt", "")
+	if err != nil {
+		log.Warn("Throw TLS Producer Side Init Error")
+	}
+
 	// Producer Dials a Worker...
-	conn, err := grpc.Dial(addr, grpc.WithInsecure())
+	conn, err := grpc.Dial(addr,
+		grpc.WithTransportCredentials(creds),
+		//grpc.WithInsecure()
+	)
+
 	if err != nil {
 		// Returns some form of Net.Error/GRPC.Error re; dial failure
 		// shouldn't be fatal, producer can have many workers...

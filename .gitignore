@@ -1,2 +1,1 @@
-/certs/server.crt
-/certs/server.key
+/certs/**

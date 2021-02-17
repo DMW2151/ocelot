@@ -2,6 +2,7 @@
 package ocelot
 
 import (
+	"errors"
 	"io"
 	"time"
 
@@ -9,9 +10,15 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	log "github.com/sirupsen/logrus"
+	"google.golang.org/grpc"
 )
 
-// UnaryHandler - Interface that processes incoming values using unary
+var (
+	// ErrIncompleteRequest - This error is reported when....
+	ErrIncompleteRequest = errors.New("some handler specific request params not met")
+)
+
+// Handler - Interface that processes incoming values using unary
 // method, I.E, One Request -> One Response
 type Handler interface {
 	Work(j *JobInstanceMsg, rCh chan *JobInstanceMsg) error
@@ -37,13 +44,12 @@ func (nh NilHandler) Work(ji *JobInstanceMsg, rCh chan *JobInstanceMsg) error {
 // Work - Required to Implement JobHandler Interface(s) - Downloas a File
 func (sh S3Handler) Work(ji *JobInstanceMsg, rCh chan *JobInstanceMsg) error {
 
-	// TODO: Init a new service on each request (if needed) while persisting the
-	// underlying session in the struct (??)
-
 	params := ji.GetParams()
+	if params == nil {
+		// TODO - Malformed Header or Params Not Supplied
+		return ErrIncompleteRequest
+	}
 
-	// In this case; the values in ji.Job.Params take precidence
-	// over ji.Job.Path
 	_, err := sh.Client.HeadObject(
 		&s3.HeadObjectInput{
 			// WARNING: Using Conversions from pb.any.Any -> Interface{} -> string
@@ -54,13 +60,9 @@ func (sh S3Handler) Work(ji *JobInstanceMsg, rCh chan *JobInstanceMsg) error {
 		},
 	)
 
-	// Log failure to get headObject
-	/*
-		TODO: Other Logic Implemented here - This can be Any Work
-		with the file, can be more complex than just getting object headers
-	*/
+	// NOTE: Check on success status, msg.success is false on init,
+	// no need to re-mark as false...
 	if err != nil {
-		// Success Status == false on init, no need to re-mark as false...
 		// TODO: Send Specific Errors back to the Producer...
 		log.WithFields(
 			log.Fields{
@@ -76,7 +78,6 @@ func (sh S3Handler) Work(ji *JobInstanceMsg, rCh chan *JobInstanceMsg) error {
 	rCh <- ji
 	ji.Mtime = time.Now().UnixNano()
 	return err
-
 }
 
 // handleStreamData - For brevity in `StreamWork` methods, forwards
@@ -86,10 +87,11 @@ func handleStreamData(jh Handler, stream OcelotWorker_ExecuteStreamServer, rCh c
 		for {
 			in, err := stream.Recv()
 			if err == io.EOF {
-				//return nil
+				//return io.EOF // or nil (?)
 			}
 			if err != nil {
-				// return err
+				log.Errorf("Stream Terminate by Producer: %+v", err)
+				return
 			}
 
 			_ = jh.Work(in, rCh)
@@ -100,9 +102,22 @@ func handleStreamData(jh Handler, stream OcelotWorker_ExecuteStreamServer, rCh c
 	// Work is sent once completed
 	for {
 		if err := stream.Send(<-rCh); err != nil {
-			log.Errorf("Called Execute Stream: %+v", err)
+			log.Errorf("Return Result to Producer Failed: %+v", err)
 			return err
 		}
 	}
+}
 
+// loggingInterceptor - Implement StreamServerInterceptor -
+func loggingInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+
+	// TODO: Implement Logging Interceptor Here...
+	log.Debug("Stream Recieved...")
+
+	// Forward Content To StreamExecutor
+	if err := handler(srv, ss); err != nil {
+		return err
+	}
+
+	return nil
 }

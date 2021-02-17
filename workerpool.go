@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 var exit chan bool
@@ -44,34 +45,48 @@ func (wp *WorkerPool) ExecuteStream(stream OcelotWorker_ExecuteStreamServer) err
 }
 
 // Serve - Listens for work coming from server...
-func (wp *WorkerPool) Serve(ctx context.Context, cancel context.CancelFunc) {
+func (wp *WorkerPool) Serve(wg *sync.WaitGroup) {
+	defer wg.Done()
 
 	// Start Workers in the background and consume from pending channel
 	// once a  producer is connected, they will push to pending...
 	sessionUUID, _ := uuid.NewUUID()
-	wp.startWorkers(ctx, sessionUUID)
+	wp.startWorkers(sessionUUID)
 
-	// Register as RPC Server - Needs an Execute Method; Whichh Should
+	// Register as RPC Server - Needs an Execute Method; Which Should
 	// Put a Value into the Channel...
-	grpcServer := grpc.NewServer()
+	creds, err := credentials.NewServerTLSFromFile("certs/server.crt", "certs/server.key")
+	if err != nil {
+		log.Errorf("Throw TLS Worker Side Init Error: %+v", err)
+		return
+	}
+
+	opts := []grpc.ServerOption{
+		grpc.Creds(creds),
+		grpc.StreamInterceptor(loggingInterceptor),
+	}
+
+	grpcServer := grpc.NewServer(opts...)
+
 	RegisterOcelotWorkerServer(grpcServer, wp)
 
 	log.Infof("Starting WorkerPool on: %s", wp.Listener.Addr())
 
 	if err := grpcServer.Serve(wp.Listener); err != nil {
-		log.Fatalf("failed to serve: %s", err)
+		log.Errorf("failed to serve: %s", err)
+		return
 	}
 
 }
 
 // StartWorkers - Start Workers, runs `wp.Params.NWorkers`
-func (wp *WorkerPool) startWorkers(ctx context.Context, sessionuuid uuid.UUID) {
+func (wp *WorkerPool) startWorkers(sessionuuid uuid.UUID) {
 
 	var wg sync.WaitGroup
 
 	wg.Add(wp.Params.NWorkers)
 	for i := 0; i < wp.Params.NWorkers; i++ {
-		go wp.start(ctx, &wg)
+		go wp.start(&wg)
 	}
 
 	log.WithFields(
@@ -86,13 +101,11 @@ func (wp *WorkerPool) startWorkers(ctx context.Context, sessionuuid uuid.UUID) {
 // start - Execute the Worker
 // Write back to server; sends whenever job is done...
 // Shouldn't encode multiple jobs before read..
-func (wp *WorkerPool) start(ctx context.Context, wg *sync.WaitGroup) {
-
-	log.Debug("Worker Started...")
+func (wp *WorkerPool) start(wg *sync.WaitGroup) {
 	defer wg.Done()
+
 	var k *JobInstanceMsg
-	// TODO: Reflect Magic To Determine if Handler is Streaming
-	// Or Basic
+
 	for {
 		k = <-wp.Pending
 		wp.Handler.Work(k, wp.Results) // Do the Work; Call the Function...

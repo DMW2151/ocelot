@@ -59,7 +59,6 @@ func createNewJob(jc *JobConfig) *Job {
 	}
 
 	// Handle for JSON -> GoLang default of 1 NanoSecond = 1 -> 1 millisecond = 10^9
-
 	return &Job{
 		ID:     jc.ID,
 		stgCh:  make(chan *JobInstanceMsg, jc.StgBuffer),
@@ -89,7 +88,7 @@ func (j *Job) newJobInstance(t time.Time) *JobInstanceMsg {
 // to the function. Used for generating UUIDs for jobs that do not have UUID specified
 // in config
 func generateStaticUUID(b []byte) (uid uuid.UUID) {
-	encUUID, _ := uuid.Parse("bcf3070f-7898-4399-bcae-4fcce2b451f5")
+	encUUID, _ := uuid.Parse("bcf3070f-7898-4399-bcae-4fcce2b451f5") // Static, but can be swapped for any new instance
 	uid = uuid.NewHash(sha256.New(), encUUID, b, 3)
 	return uid
 }

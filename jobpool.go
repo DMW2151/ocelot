@@ -55,7 +55,6 @@ func (jp *JobPool) startSchedule(j *Job) {
 	jp.sendInstance(j, time.Now())
 
 	for {
-
 		select {
 		// Ticks until quit signal recieved; use go j.sendInstance w. a timeout rather
 		// than w. default case to prevent blocking the kill signal or using a ton of CPU

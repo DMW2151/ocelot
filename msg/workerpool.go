@@ -12,8 +12,6 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-var exit chan bool
-
 // WorkerPool - net.Conn with WorkParams attached. WorkParams
 // set channel buffering, concurrency, etc. of WorkerPool
 // TODO: Some reflect Magic to determine streaming or basic handler...
@@ -23,10 +21,9 @@ type WorkerPool struct {
 	Pending   chan *JobInstanceMsg
 	Results   chan *JobInstanceMsg
 	RPCServer *grpc.Server
-	// Most likely User defined function of type
-	// JobHandler that workers in this pool execute
+
+	// JobHandler - What the workers in this pool execute!!
 	Handler Handler
-	mu      sync.Mutex
 }
 
 // Execute -
@@ -106,7 +103,10 @@ func (wp *WorkerPool) start(wg *sync.WaitGroup) {
 
 	for {
 		k = <-wp.Pending
-		wp.Handler.Work(k, wp.Results) // Do the Work; Call the Function...
+		err := wp.Handler.Work(k, wp.Results) // Do the Work; Call the Function...
+		if err != nil {
+			log.Warn("TODO: Better Handler Errors!!")
+		}
 	}
 
 }

@@ -2,14 +2,12 @@ package ocelot
 
 import (
 	"errors"
-	"io"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	log "github.com/sirupsen/logrus"
-	"google.golang.org/grpc"
 )
 
 // Handler - Interface that processes incoming values using unary
@@ -85,11 +83,8 @@ func handleStreamData(jh Handler, stream OcelotWorker_ExecuteStreamServer, rCh c
 	go func() {
 		for {
 			in, err := stream.Recv()
-			if err == io.EOF {
-				//return io.EOF // or nil (?)
-			}
 			if err != nil {
-				log.Errorf("Stream Terminate by Producer: %+v", err)
+				log.Errorf("Stream Terminated by Producer: %+v", err)
 				return
 			}
 
@@ -105,24 +100,4 @@ func handleStreamData(jh Handler, stream OcelotWorker_ExecuteStreamServer, rCh c
 			return err
 		}
 	}
-}
-
-// loggingInterceptor - Implement StreamServerInterceptor -
-// Server side logging for confirming incoming requests
-func loggingInterceptor(
-	srv interface{},
-	ss grpc.ServerStream,
-	info *grpc.StreamServerInfo,
-	handler grpc.StreamHandler,
-) error {
-
-	// TODO: Implement Logging Interceptor Here...
-	log.Debug("Stream Recieved...")
-
-	// Forward Content To StreamExecutor
-	if err := handler(srv, ss); err != nil {
-		return err
-	}
-
-	return nil
 }

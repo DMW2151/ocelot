@@ -64,7 +64,7 @@ func createNewJob(jc *JobConfig) *Job {
 	// NOTE: No longer need this? Before req. channel > 0, now any non-neg value
 	// will suffice. If buffer is negative; set to 0, prevent panic...
 	if b := (jc.StgBuffer < 0); b {
-		log.Warn("Require Job Channel Buffer Non Neg (got %d), setting to 0", jc.StgBuffer)
+		log.Warnf("Require Job Channel Buffer Non Neg (got %d), setting to 0", jc.StgBuffer)
 		jc.StgBuffer = 0
 	}
 

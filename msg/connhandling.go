@@ -57,11 +57,10 @@ func RegisterNewStreamingWorker(addr string, cp ConnPool) OcelotWorker_ExecuteSt
 // SendtoWorker - blach
 func SendtoWorker(sc OcelotWorker_ExecuteStreamClient, pChan <-chan *JobInstanceMsg) bool {
 
-	var ji = &JobInstanceMsg{} // Dummy JobInstance
-
 	// Start one goroutine to recieve content back from the worker, in this
 	// case, the job status
 	go func() {
+		// NOTE: golangci-lint run hates this....
 		for {
 			// While Data && !io.EOF, write to Producer side logs below
 			// Could be (err == io.EOF) to be more permissive here; mostly io.EOF
@@ -83,19 +82,21 @@ func SendtoWorker(sc OcelotWorker_ExecuteStreamClient, pChan <-chan *JobInstance
 	}()
 
 	// Start one goroutine to send jobs to the worker
-	for {
-		select {
-		case ji = <-pChan:
-			// If we recieve any error, INCLUDING EOF, Exit...
-			if err := sc.Send(ji); err != nil {
-				log.WithFields(
-					log.Fields{"Err": err},
-				).Warn("Failed to Send Message - Exiting")
-				sc.CloseSend()
-				return false
+	for ji := range pChan {
+		// If we recieve any error, INCLUDING EOF, Exit...
+		if err := sc.Send(ji); err != nil {
+			log.WithFields(
+				log.Fields{"Err": err},
+			).Warn("failed to send message - exiting")
+			err = sc.CloseSend()
+			if err != nil {
+				log.Warn("err on stream close") // Normal Shutdown Failed...Don't panic!
 			}
+			return false
 		}
 	}
+
+	return false
 }
 
 func handleWorkerAssignment(addr string, cp ConnPool) (OcelotWorkerClient, error) {

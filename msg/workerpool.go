@@ -45,8 +45,7 @@ func (wp *WorkerPool) ExecuteStream(stream OcelotWorker_ExecuteStreamServer) err
 }
 
 // Serve - Listens for work coming from server...
-func (wp *WorkerPool) Serve(wg *sync.WaitGroup) {
-	defer wg.Done()
+func (wp *WorkerPool) Serve() {
 
 	// Start Workers in the background and consume from pending channel
 	// once a  producer is connected, they will push to pending...

@@ -1,16 +1,12 @@
 package main
 
 import (
-	"os"
-	"strconv"
-	"sync"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
-	ocelot "github.com/dmw2151/ocelot"
+	msg "github.com/dmw2151/ocelot/msg"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -27,13 +23,12 @@ var (
 	// Placeholder Error
 	err error
 
-	// Define S3 Handler
-	h = ocelot.S3Handler{
+	// Define S3 Handler - Included as part of ocelot/msg but could be anything
+	// that satisfies ocelot/msg Handler interface...
+	h = msg.S3Handler{
 		Session: s3Session,
 		Client:  s3.New(session.Must(s3Session, err)),
 	}
-
-	wg sync.WaitGroup
 )
 
 func init() {
@@ -45,12 +40,9 @@ func init() {
 }
 
 func main() {
-	
-	wp, _ := ocelot.NewWorkerPool(h)
 
-	// In theory, you may want to block w. WG??
-	wg.Add(1)
-	wp.Serve(&wg)
-	wg.Wait()
-
+	// Start New WorkerPool. Blocks forerver, waiting to execute
+	// the handler, in this case (msg.S3Handler)
+	wp, _ := msg.NewWorkerPool(h)
+	wp.Serve()
 }

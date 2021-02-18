@@ -4,11 +4,17 @@
 
 ## S.0 - TODO
 
-1. Allow for multiple handlers in same worker group
-2. Reduce API surface space, remove unnesc. exported funcs
-3. Recycle original TCP tests -> GRPC tests
-4. Create example in Python on worker side to prove protobuf works OK
-5. Still doing dev on 1.12, Fastforward to 1.15
+- [x] Single End to End Working Example
+- [x] Rename Env Vars to be more Descriptive
+- [ ] Json -> Yaml or Toml Config
+- [x] Create Worker and Producer Dockerfile
+- [ ] Allow for multiple handlers in same worker group
+- [ ] Reduce API surface space, remove unnesc. exported funcs
+- [ ] Recycle original TCP tests -> GRPC tests
+- [ ] Create example in Python on worker side to prove protobuf works OK
+- [ ] Still doing dev on 1.12, Fastforward to 1.15
+
+
 
 
 ## S.1 - Examples
@@ -27,7 +33,8 @@ import (
 
 func main() {
 
-    // Generate New Producer & Start Scheduled Jobs
+    // Generate New Producer & Start Scheduled Jobs; Will Timeout
+    // on sends until there is a worker present
     p, _ := ocelot.NewProducer()
     p.StartJobs()
 
@@ -38,10 +45,15 @@ func main() {
     }
 
     // Register New Worker Address(es); Jobs directed via
-    // GRPC Stream to workers
-    msg.RegisterNewStreamingWorker(
+    // GRPC Stream to workers...
+    streamClient := msg.RegisterNewStreamingWorker(
         "127.0.0.1:2151", cP,
     )
+
+    // Send Work...
+    if ok := msg.SendtoWorker(streamClient, p); !ok {
+        log.Warn("Exit...")
+    }
 }
 ```
 

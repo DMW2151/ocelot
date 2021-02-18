@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/dmw2151/ocelot"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -55,7 +56,7 @@ func RegisterNewStreamingWorker(addr string, cp ConnPool) OcelotWorker_ExecuteSt
 }
 
 // SendtoWorker - blach
-func SendtoWorker(sc OcelotWorker_ExecuteStreamClient, pChan <-chan *JobInstanceMsg) bool {
+func SendtoWorker(sc OcelotWorker_ExecuteStreamClient, p *ocelot.Producer) bool {
 
 	// Start one goroutine to recieve content back from the worker, in this
 	// case, the job status
@@ -81,10 +82,20 @@ func SendtoWorker(sc OcelotWorker_ExecuteStreamClient, pChan <-chan *JobInstance
 		}
 	}()
 
-	// Start one goroutine to send jobs to the worker
-	for ji := range pChan {
+	// Start one goroutine to send jobs to the worker -
+	for ji := range p.Pool.StgCh {
+
+		// Convert JobInstance -> JobInstanceMsg Manually
+		// TODO: Do this with Proto MSG Instead (??)
+		jiMsg := &JobInstanceMsg{
+			JobID:      ji.JobID,
+			InstanceID: ji.InstanceID,
+			Ctime:      ji.Ctime,
+			Params:     ji.Params,
+		}
+
 		// If we recieve any error, INCLUDING EOF, Exit...
-		if err := sc.Send(ji); err != nil {
+		if err := sc.Send(jiMsg); err != nil {
 			log.WithFields(
 				log.Fields{"Err": err},
 			).Warn("failed to send message - exiting")

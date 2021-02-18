@@ -11,9 +11,9 @@ import (
 
 // Producer - Object that Manages the Scheduler/Producer/Server
 type Producer struct {
-	// JobPool, used to pool tickers from multiple jobs to one
+	// JobPool, used to Pool tickers from multiple jobs to one
 	// see full description of struct's fields in jobpool.go
-	pool    *JobPool
+	Pool    *JobPool
 	config  *ProducerConfig
 	quitCh  chan bool
 	MaxConn int `json:"max_connections"`
@@ -39,7 +39,7 @@ type ProducerConfig struct {
 	// Default Timeout for Sends to Staging Channnel
 	JobTimeout time.Duration `json:"job_timeout"`
 
-	// Buffer for the pool of multiple jobs sharing one handler...
+	// Buffer for the Pool of multiple jobs sharing one handler...
 	HandlerBuffer int `json:"handler_buffer"`
 }
 
@@ -61,10 +61,10 @@ func NewProducer() (*Producer, error) {
 
 	// Create Producer, filling in values required from config
 	p := Producer{
-		pool: &JobPool{
+		Pool: &JobPool{
 			jobs:  jobs,
 			wg:    sync.WaitGroup{},
-			stgCh: make(chan (*JobInstance), cfgServer.JobChannelBuffer),
+			StgCh: make(chan (*JobInstance), cfgServer.JobChannelBuffer),
 		},
 		config:  cfgServer,
 		MaxConn: cfgServer.MaxConn,
@@ -79,14 +79,14 @@ func NewProducer() (*Producer, error) {
 // TODO: What do subsequent calls to p.StartJobs do?
 func (p *Producer) StartJobs() {
 
-	p.pool.wg.Add(len(p.pool.jobs))
+	p.Pool.wg.Add(len(p.Pool.jobs))
 
-	for _, j := range p.pool.jobs {
-		go p.pool.startSchedule(j)
+	for _, j := range p.Pool.jobs {
+		go p.Pool.startSchedule(j)
 	}
 
 	go func() {
-		p.pool.wg.Wait()
+		p.Pool.wg.Wait()
 	}()
 }
 
@@ -94,7 +94,7 @@ func (p *Producer) StartJobs() {
 // behavior of p.StartJobs() for a new, user defined job. Does not need to
 // be called with server start
 func (p *Producer) StartJob(j *Job) {
-	p.pool.wg.Add(1)
-	go p.pool.startSchedule(j) // Start Producer - Start Ticks
-	p.pool.jobs = append(p.pool.jobs, j)
+	p.Pool.wg.Add(1)
+	go p.Pool.startSchedule(j) // Start Producer - Start Ticks
+	p.Pool.jobs = append(p.Pool.jobs, j)
 }

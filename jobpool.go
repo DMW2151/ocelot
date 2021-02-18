@@ -11,8 +11,8 @@ import (
 // generated from config
 type JobPool struct {
 	jobs  []*Job
-	stgCh chan *JobInstance
-	wg    sync.WaitGroup
+	StgCh chan *JobInstance
+	wg    sync.WaitGroup // Used to Manage The Exits  of the  Tickers...
 }
 
 // StopJob - Access the underlying job in JobPool by stoping the ticker
@@ -28,7 +28,7 @@ func (jp *JobPool) sendInstance(j *Job, t time.Time) {
 	// send within timeout interval (default: 100ms) then drop this JobInstance
 	select {
 
-	case jp.stgCh <- j.newJobInstance(t):
+	case jp.StgCh <- j.newJobInstance(t):
 	case <-time.After(time.Millisecond * 100):
 		log.WithFields(
 			log.Fields{"Job ID": j.ID},

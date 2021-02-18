@@ -2,7 +2,6 @@
 package ocelot
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"time"
@@ -24,8 +23,7 @@ type WorkParams struct {
 	MaxBuffer int `json:"max_buffer"`
 
 	// IP and Host of Producer
-	Host string `json:"host"`
-	Port string `json:"port"`
+	ListenAddr string `json:"listen_addr"`
 
 	// How long to wait on Producer to respond
 	DialTimeout time.Duration `json:"dial_timeout"`
@@ -43,19 +41,15 @@ func NewWorkerPool(h Handler) (*WorkerPool, error) {
 
 	workCfg := k.(*WorkParams)
 
-	// Init Connection
-	l, err := net.Listen(
-		"tcp",
-		fmt.Sprintf("%s:%s", workCfg.Host, workCfg.Port),
-	)
+	// Init Connection & Listen for connections from
+	l, err := net.Listen("tcp", workCfg.ListenAddr)
 
-	// Difficult to Test, but this MUST be a Fatal Exit
+	// Difficult to Test, but this must be a Fatal Exit
 	if err != nil {
 		log.WithFields(
 			log.Fields{
 				"Error": err,
-				"Host":  workCfg.Host,
-				"Port":  workCfg.Port,
+				"Addr":  workCfg.ListenAddr,
 			},
 		).Fatal("Could Not Listen on Addr")
 	}

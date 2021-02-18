@@ -41,8 +41,8 @@ func init() {
 
 func main() {
 
-	// Start New WorkerPool. Blocks forerver, waiting to execute
-	// the handler, in this case (msg.S3Handler)
+	// Start New WorkerPool. Launches on
+	// Blocks forerver, waiting to execute the handler, in this case (msg.S3Handler)
 	wp, _ := msg.NewWorkerPool(h)
 	wp.Serve()
 }

@@ -22,15 +22,19 @@ func main() {
 	p.StartJobs()
 
 	// Generate New Conn Pool w. Max Workers == 5
-	// TODO: VSCode Complains on this line...
 	cP := msg.ConnPool{
 		Sem:             semaphore.NewWeighted(5),
 		OpenConnections: make([]msg.OcelotWorkerClient, 5),
 	}
 
-	// Register New Worker Address
-	msg.RegisterNewStreamingWorker(
+	// Register New Worker Address - This Must be From List of Active
+	// Workers...
+	streamClient := msg.RegisterNewStreamingWorker(
 		"127.0.0.1:2151", cP,
 	)
+
+	if ok := msg.SendtoWorker(streamClient, p); !ok {
+		log.Warn("Exit...")
+	}
 
 }

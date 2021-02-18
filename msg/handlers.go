@@ -1,4 +1,3 @@
-// Package ocelot ...
 package ocelot
 
 import (
@@ -13,16 +12,16 @@ import (
 	"google.golang.org/grpc"
 )
 
-var (
-	// ErrIncompleteRequest - This error is reported when....
-	ErrIncompleteRequest = errors.New("some handler specific request params not met")
-)
-
 // Handler - Interface that processes incoming values using unary
 // method, I.E, One Request -> One Response
 type Handler interface {
 	Work(j *JobInstanceMsg, rCh chan *JobInstanceMsg) error
 }
+
+var (
+	// ErrIncompleteRequest - This error is reported when....
+	ErrIncompleteRequest = errors.New("some handler specific request params not met")
+)
 
 // NilHandler - Dummy Handler; Allows for Ping-Pong between GRPC client and
 // server, does no work aside from marking mtime and success. Implements both
@@ -109,7 +108,13 @@ func handleStreamData(jh Handler, stream OcelotWorker_ExecuteStreamServer, rCh c
 }
 
 // loggingInterceptor - Implement StreamServerInterceptor -
-func loggingInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+// Server side logging for confirming incoming requests
+func loggingInterceptor(
+	srv interface{},
+	ss grpc.ServerStream,
+	info *grpc.StreamServerInfo,
+	handler grpc.StreamHandler,
+) error {
 
 	// TODO: Implement Logging Interceptor Here...
 	log.Debug("Stream Recieved...")

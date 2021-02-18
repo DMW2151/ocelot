@@ -2,7 +2,9 @@ package main
 
 import (
 	"github.com/dmw2151/ocelot"
+	msg "github.com/dmw2151/ocelot/msg"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/semaphore"
 )
 
 func init() {
@@ -15,8 +17,20 @@ func init() {
 
 func main() {
 
+	// Generate New Producer...
 	p, _ := ocelot.NewProducer()
 	p.StartJobs()
-	p.RegisterNewStreamingWorker("127.0.0.1:2151")
+
+	// Generate New Conn Pool w. Max Workers == 5
+	// TODO: VSCode Complains on this line...
+	cP := msg.ConnPool{
+		Sem:             semaphore.NewWeighted(5),
+		OpenConnections: make([]msg.OcelotWorkerClient, 5),
+	}
+
+	// Register New Worker Address
+	msg.RegisterNewStreamingWorker(
+		"127.0.0.1:2151", cP,
+	)
 
 }

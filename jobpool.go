@@ -8,9 +8,10 @@ import (
 )
 
 // JobPool - Collection of jobs that are currently active on the producer
+// generated from config
 type JobPool struct {
 	jobs  []*Job
-	stgCh chan *JobInstanceMsg
+	stgCh chan *JobInstance
 	wg    sync.WaitGroup
 }
 
@@ -31,7 +32,7 @@ func (jp *JobPool) sendInstance(j *Job, t time.Time) {
 	case <-time.After(time.Millisecond * 100):
 		log.WithFields(
 			log.Fields{"Job ID": j.ID},
-		).Debug("JobInstance Timeout - Dropped Job")
+		).Warn("JobInstance Timeout - Dropped Job")
 	}
 }
 

@@ -45,17 +45,12 @@ func init() {
 }
 
 func main() {
-	nWorkerNodes, err := strconv.Atoi(os.Args[1])
-	if err != nil {
-		log.Fatal("Could not start %d Worker Nodes", os.Args[1])
-	}
-
+	
 	wp, _ := ocelot.NewWorkerPool(h)
-	wg.Add(nWorkerNodes)
-	for i := 0; i < nWorkerNodes; i++ {
-		go wp.Serve(&wg)
-	}
 
+	// In theory, you may want to block w. WG??
+	wg.Add(1)
+	wp.Serve(&wg)
 	wg.Wait()
 
 }

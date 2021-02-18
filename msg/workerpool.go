@@ -63,7 +63,6 @@ func (wp *WorkerPool) Serve(wg *sync.WaitGroup) {
 
 	opts := []grpc.ServerOption{
 		grpc.Creds(creds),
-		grpc.StreamInterceptor(loggingInterceptor),
 	}
 
 	grpcServer := grpc.NewServer(opts...)

@@ -2,10 +2,10 @@
 package ocelot
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"time"
 
+	utils "github.com/dmw2151/ocelot/internal"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
@@ -18,7 +18,7 @@ type Job struct {
 
 	// Job Specific Channel; used to signal job interval has elapsed to
 	// central producer channel
-	stgCh chan *JobInstanceMsg
+	stgCh chan *JobInstance
 
 	// quitCh - Used to stop the job's ticker externally
 	quitCh chan bool
@@ -39,13 +39,23 @@ type JobConfig struct {
 	Params    map[string]string `json:"params"`
 }
 
+// JobInstance -
+type JobInstance struct {
+	JobID      string
+	InstanceID string
+	Ctime      int64
+	Mtime      int64
+	Success    bool
+	Params     map[string]string
+}
+
 // createNewJob - Creates a new Job from config, adds UUID, stg channel,
 // quit channel, and Ticker to the params defined in yaml
 func createNewJob(jc *JobConfig) *Job {
 
 	// Generate Static Hash for Each Job If UUID is Not Generated
 	if jc.ID == uuid.Nil {
-		jc.ID = generateStaticUUID(
+		jc.ID = utils.GenerateStaticUUID(
 			[]byte(
 				fmt.Sprintf("%v%s", jc.Params, fmt.Sprint(jc.Tdelta)),
 			))
@@ -61,7 +71,7 @@ func createNewJob(jc *JobConfig) *Job {
 	// Handle for JSON -> GoLang default of 1 NanoSecond = 1 -> 1 millisecond = 10^9
 	return &Job{
 		ID:     jc.ID,
-		stgCh:  make(chan *JobInstanceMsg, jc.StgBuffer),
+		stgCh:  make(chan *JobInstance, jc.StgBuffer),
 		quitCh: make(chan bool, 1),
 		ticker: time.NewTicker(jc.Tdelta * time.Millisecond), // Convert to milliS from nanoS
 		params: jc.Params,
@@ -70,9 +80,9 @@ func createNewJob(jc *JobConfig) *Job {
 }
 
 // newJobInstance - Creates new JobInstance using parent Job as a template
-func (j *Job) newJobInstance(t time.Time) *JobInstanceMsg {
+func (j *Job) newJobInstance(t time.Time) *JobInstance {
 
-	ji := &JobInstanceMsg{
+	ji := &JobInstance{
 		JobID:      j.ID.String(),
 		InstanceID: uuid.New().String(),
 		Ctime:      t.UnixNano(),
@@ -82,13 +92,4 @@ func (j *Job) newJobInstance(t time.Time) *JobInstanceMsg {
 	}
 
 	return ji
-}
-
-// generateStaticUUID - Using a static UUID, generate a neww UUID from content fed
-// to the function. Used for generating UUIDs for jobs that do not have UUID specified
-// in config
-func generateStaticUUID(b []byte) (uid uuid.UUID) {
-	encUUID, _ := uuid.Parse("bcf3070f-7898-4399-bcae-4fcce2b451f5") // Static, but can be swapped for any new instance
-	uid = uuid.NewHash(sha256.New(), encUUID, b, 3)
-	return uid
 }

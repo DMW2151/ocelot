@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	utils "github.com/dmw2151/ocelot/internal"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -35,7 +36,7 @@ type WorkParams struct {
 func NewWorkerPool(h Handler) (*WorkerPool, error) {
 
 	// Open the Config File...
-	k := parseConfig(
+	k := utils.ParseConfig(
 		os.Getenv("OCELOT_WORKER_CFG"),
 		&WorkParams{},
 	)

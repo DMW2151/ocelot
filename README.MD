@@ -13,8 +13,6 @@
 
 ## S.1 - Examples
 
-Start a Producer (Acting as a GRPC client to Workers)
-
 ```golang
 // Minimal Example of Producer Setup
 // go run ./cmd/ocelot-grpc/client/rpcclient.go
@@ -49,6 +47,7 @@ func main() {
 
 ```golang
 // Start Single Worker (Acting as a GRPC Server)
+// go run ./cmd/ocelot-grpc/worker/rpcworker.go
 package main
 
 import (

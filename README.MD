@@ -1,6 +1,6 @@
 # Description
 
-"Ocelot" is a framework for deploying jobs scheduled for short intervals across multiple worker nodes. The producer communicates to workers by serializing messages from a job producer to protobuf. Because of this, workers/handlers can be written in any language that supports protobuf. In effect, a personal attempt at something like Celery-beat.
+"Ocelot" [WIP] is a framework for deploying jobs scheduled for short intervals across multiple worker nodes. The producer communicates to workers by serializing messages from a job producer to protobuf. Because of this, workers/handlers can be written in any language that supports protobuf. In effect, a personal attempt at something like Celery-beat.
 
 ## S.0 - TODO
 
